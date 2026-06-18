@@ -49,12 +49,18 @@ class EngagementResult:
     selected_face_score: float = 0.0
 
     def to_protocol_dict(self) -> dict:
-        # Preserve the existing command protocol: only status/confidence/reason are sent.
-        return {
+        # Preserve the existing command protocol and add optional normalized face
+        # coordinates only when the detector has a stable face. Godot treats these
+        # as hints for subtle face-following, not as perception decisions.
+        payload = {
             "status": self.status,
             "confidence": round(float(self.confidence), 3),
             "reason": self.reason,
         }
+        if self.face_center_norm is not None:
+            payload["face_x_norm"] = round(float(self.face_center_norm[0]), 3)
+            payload["face_y_norm"] = round(float(self.face_center_norm[1]), 3)
+        return payload
 
     def to_log_dict(self) -> dict:
         data = asdict(self)

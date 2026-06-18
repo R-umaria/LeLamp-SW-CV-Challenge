@@ -369,7 +369,7 @@ def main() -> int:
             )
             return 1
 
-    logger.info("Starting Milestone 4.3.2 backend with non-blocking browser chat and homelab Ollama support")
+    logger.info("Starting Milestone 4.3.3 backend with expressive Godot polish, optional face-follow hints, non-blocking browser chat, and homelab Ollama support")
     logger.info("Run id=%s", run_paths.run_id)
     logger.info("Run directory=%s", run_paths.run_dir)
     if not args.no_latest:
@@ -700,7 +700,7 @@ def main() -> int:
                 )
                 if object_detector.enabled:
                     draw_object_overlay(frame, display_detections)
-                cv2.imshow("LeLamp Milestone 4.3.2 - Engagement/Object Memory/Browser Recall", frame)
+                cv2.imshow("LeLamp Milestone 4.3.3 - Engagement/Object Memory/Browser Recall", frame)
                 key = cv2.waitKey(1) & 0xFF
                 if key in (27, ord("q")):
                     logger.info("Quit requested from preview window")
@@ -728,7 +728,7 @@ def main() -> int:
         camera.release()
         if runtime_config.show_window:
             cv2.destroyAllWindows()
-        logger.info("Stopped Milestone 4.3.2 backend")
+        logger.info("Stopped Milestone 4.3.3 backend")
 
     return 0
 

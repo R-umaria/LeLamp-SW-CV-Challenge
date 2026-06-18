@@ -32,6 +32,15 @@ class IntentParserTests(unittest.TestCase):
     def test_what_objects_detected(self) -> None:
         self.assert_intent("What objects did you detect?", ConversationIntentType.LIST_RECENT_OBJECTS, None)
 
+    def test_what_objects_do_you_see(self) -> None:
+        self.assert_intent("What objects do you see?", ConversationIntentType.LIST_RECENT_OBJECTS, None)
+
+    def test_what_can_you_see(self) -> None:
+        self.assert_intent("What can you see?", ConversationIntentType.LIST_RECENT_OBJECTS, None)
+
+    def test_what_are_you_seeing(self) -> None:
+        self.assert_intent("What are you seeing?", ConversationIntentType.LIST_RECENT_OBJECTS, None)
+
     def test_what_do_you_remember_seeing(self) -> None:
         self.assert_intent("What do you remember seeing?", ConversationIntentType.LIST_RECENT_OBJECTS, None)
 
@@ -49,6 +58,9 @@ class IntentParserTests(unittest.TestCase):
 
     def test_unsupported_chitchat(self) -> None:
         self.assert_intent("Tell me a joke", ConversationIntentType.UNSUPPORTED, None)
+
+    def test_how_are_you_remains_unsupported(self) -> None:
+        self.assert_intent("How are you?", ConversationIntentType.UNSUPPORTED, None)
 
 
 if __name__ == "__main__":

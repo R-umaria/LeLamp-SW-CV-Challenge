@@ -26,33 +26,38 @@ TEST_SEQUENCE: list[dict] = [
     },
     {
         "state": "engaged",
-        "engagement": {"status": "engaged", "confidence": 0.92, "reason": "test_face_centered"},
+        "engagement": {"status": "engaged", "confidence": 0.92, "reason": "test_face_centered", "face_x_norm": 0.50, "face_y_norm": 0.48},
         "behavior": {"motion": "attentive_nod", "light": "steady_warm", "sound": None, "speech_text": None},
     },
     {
         "state": "disengaged",
-        "engagement": {"status": "disengaged", "confidence": 0.77, "reason": "test_head_turned"},
+        "engagement": {"status": "disengaged", "confidence": 0.77, "reason": "test_head_turned", "face_x_norm": 0.18, "face_y_norm": 0.50},
         "behavior": {"motion": "searching_glance", "light": "slow_pulse", "sound": None, "speech_text": None},
     },
     {
         "state": "seeking_attention",
-        "engagement": {"status": "disengaged", "confidence": 0.84, "reason": "test_sustained_disengagement"},
+        "engagement": {"status": "disengaged", "confidence": 0.84, "reason": "test_sustained_disengagement", "face_x_norm": 0.82, "face_y_norm": 0.52},
         "behavior": {"motion": "curious_tilt", "light": "soft_pulse", "sound": "gentle_chime", "speech_text": None},
     },
     {
         "state": "scanning",
-        "engagement": {"status": "engaged", "confidence": 0.70, "reason": "test_scene_scan"},
+        "engagement": {"status": "engaged", "confidence": 0.70, "reason": "test_scene_scan", "face_x_norm": 0.36, "face_y_norm": 0.46},
         "behavior": {"motion": "scanning", "light": "scan_sweep", "sound": None, "speech_text": None},
     },
     {
         "state": "recalling",
-        "engagement": {"status": "engaged", "confidence": 0.88, "reason": "test_memory_query"},
+        "engagement": {"status": "engaged", "confidence": 0.88, "reason": "test_memory_query", "face_x_norm": 0.50, "face_y_norm": 0.50},
         "behavior": {
             "motion": "thinking",
             "light": "focus_glow",
             "sound": None,
             "speech_text": "Let me check what I remember.",
         },
+    },
+    {
+        "state": "sleep",
+        "engagement": {"status": "absent", "confidence": 0.0, "reason": "test_backend_stale_sleep"},
+        "behavior": {"motion": "sleep_rest", "light": "sleep_red", "sound": None, "speech_text": None},
     },
 ]
 

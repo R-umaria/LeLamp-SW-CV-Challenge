@@ -8,11 +8,11 @@ Godot does **not** make engagement, memory, recall, or behavior decisions. The P
 
 Use Godot 4.6.3 stable or newer Godot 4.x stable. The project uses basic Godot 4 nodes, primitive meshes, GDScript, and `PacketPeerUDP`; it does not require C#/.NET.
 
-## Milestone 4.2 visual polish
+## Milestone 4.3.3 expressive polish
 
-Milestone 4.2 changes the default camera to a front-three-quarter view. The lamp head and visible light cone point along the rig's local `-Z` axis, so the camera is now placed on that front side with a slight side offset. This makes the head, front marker, light cone, arm joints, and recall answer panel visible in the final demo.
+Milestone 4.3.3 keeps Godot as a bounded animation/display layer while making the demo read more like a social robotic lamp. The default scene now includes a lightweight desk, wall, window, shelf, soft ambient light, and a front-three-quarter camera. The lamp head and visible light cone still point along the rig's local `-Z` axis.
 
-The 6-DOF animation axes are unchanged. The polish is primarily camera placement, lighting, and a small visible front/look marker on the lamp head.
+The 6-DOF animation axes are unchanged. The polish is procedural motion, camera placement, lighting, and simple primitive scene geometry. No imported model, voice input, perception logic, memory logic, or new AI dependency was added to Godot.
 
 ## Folder layout
 
@@ -46,6 +46,7 @@ Runtime-created UI:
 
 ```text
 Main
+├── DemoEnvironment (runtime primitive desk/room backdrop)
 └── LeLampCanvas (CanvasLayer)
     ├── DebugPanel (PanelContainer)
     │   └── DebugLabel (Label)
@@ -104,18 +105,31 @@ The receiver expects one JSON object per UDP packet, preserving the backend comm
 }
 ```
 
-Milestone 4.2 does not change this schema.
+Milestone 4.3.3 preserves the protocol shape. It adds optional normalized face hints under `engagement` when Python has them:
+
+```json
+"engagement": {
+  "status": "engaged",
+  "confidence": 0.92,
+  "reason": "face_centered",
+  "face_x_norm": 0.50,
+  "face_y_norm": 0.48
+}
+```
+
+If these fields are missing, Godot falls back to the existing centered procedural animations.
 
 ## Behavior mapping
 
 | Backend command | Godot placeholder animation |
 | --- | --- |
-| `idle` / `idle_breathe` | Small breathing motion, dim lamp |
-| `engaged` / `attentive_nod` | Centered pose with nodding head |
-| `disengaged` / `searching_glance` | Sweeping base and wrist glance |
-| `seeking_attention` / `curious_tilt` + `soft_pulse` | Curious tilt and brighter pulsing light |
+| `idle` / `idle_breathe` | Subtle breathing, tiny sway, soft warm dim lamp |
+| `engaged` / `attentive_nod` | Forward attentive pose, small nod, warm steady light, optional face-follow |
+| `disengaged` / `searching_glance` | Slower side-to-side search, head scan, slow light pulse |
+| `seeking_attention` / `curious_tilt` + `soft_pulse` | Asymmetric tilt, anticipation motion, soft pulse, tiny restrained bounce |
 | `scanning` | Wider base sweep and scan light |
-| `recalling` / `thinking` + `focus_glow` | Thinking pose, focus glow, and visible recall answer panel |
+| `recalling` / `thinking` + `focus_glow` | Immediate thinking pose, head down, focus glow, small waiting oscillation, visible answer panel |
+| local stale `sleep` / `sleep_rest` + `sleep_red` | Folded pet-like rest pose, very dim red light, no active search/nod |
 
 ## Run the frontend
 
@@ -135,7 +149,7 @@ From the project root:
 python -m backend.tools.send_test_commands --count 24 --interval 1.0
 ```
 
-Expected result: the debug panel cycles through `idle`, `engaged`, `disengaged`, `seeking_attention`, `scanning`, and `recalling`; the lamp changes motion/light behavior on each packet; the recall answer panel appears during the `recalling` command.
+Expected result: the debug panel cycles through `idle`, `engaged`, `disengaged`, `seeking_attention`, `scanning`, `recalling`, and `sleep`; the lamp changes motion/light behavior on each packet; the recall answer panel appears during the `recalling` command; face-follow hints subtly yaw the lamp when present.
 
 ## Connect the real backend
 

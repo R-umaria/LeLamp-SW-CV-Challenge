@@ -27,6 +27,7 @@ var _sleeping_due_to_stale: bool = false
 
 func _ready() -> void:
 	_setup_camera_and_light()
+	_build_scene_environment()
 	_build_ui()
 
 	udp_receiver.command_received.connect(_on_command_received)
@@ -61,8 +62,51 @@ func _setup_camera_and_light() -> void:
 	sun.light_energy = 1.45
 
 	fill_light.position = Vector3(-2.3, 2.7, -2.4)
-	fill_light.light_energy = 0.9
+	fill_light.light_energy = 1.05
 	fill_light.omni_range = 6.0
+
+
+func _build_scene_environment() -> void:
+	if has_node("DemoEnvironment"):
+		return
+
+	var root: Node3D = Node3D.new()
+	root.name = "DemoEnvironment"
+	add_child(root)
+
+	var desk_material: StandardMaterial3D = _make_env_material(Color(0.43, 0.31, 0.21), 0.12)
+	var wall_material: StandardMaterial3D = _make_env_material(Color(0.30, 0.33, 0.36), 0.05)
+	var floor_material: StandardMaterial3D = _make_env_material(Color(0.18, 0.19, 0.20), 0.05)
+	var trim_material: StandardMaterial3D = _make_env_material(Color(0.18, 0.20, 0.22), 0.08)
+	var glass_material: StandardMaterial3D = _make_env_material(Color(0.28, 0.43, 0.62), 0.25)
+	var accent_material: StandardMaterial3D = _make_env_material(Color(0.62, 0.50, 0.34), 0.18)
+
+	root.add_child(_box_mesh("DeskSurface", Vector3(3.6, 0.08, 2.25), Vector3(0.0, -0.04, 0.05), desk_material))
+	root.add_child(_box_mesh("DeskFrontLip", Vector3(3.7, 0.12, 0.06), Vector3(0.0, -0.03, -1.10), trim_material))
+	root.add_child(_box_mesh("BackWall", Vector3(4.6, 2.4, 0.08), Vector3(0.0, 1.15, 1.18), wall_material))
+	root.add_child(_box_mesh("FloorShadowPlane", Vector3(4.7, 0.05, 3.4), Vector3(0.0, -0.09, 0.25), floor_material))
+
+	# Lightweight room cues: a small window and shelf behind the lamp keep the
+	# scene readable without adding imported assets or physics cost.
+	root.add_child(_box_mesh("WindowGlass", Vector3(0.88, 0.58, 0.025), Vector3(-1.18, 1.45, 1.125), glass_material))
+	root.add_child(_box_mesh("WindowTop", Vector3(0.98, 0.045, 0.04), Vector3(-1.18, 1.765, 1.095), trim_material))
+	root.add_child(_box_mesh("WindowBottom", Vector3(0.98, 0.045, 0.04), Vector3(-1.18, 1.135, 1.095), trim_material))
+	root.add_child(_box_mesh("WindowLeft", Vector3(0.045, 0.64, 0.04), Vector3(-1.69, 1.45, 1.095), trim_material))
+	root.add_child(_box_mesh("WindowRight", Vector3(0.045, 0.64, 0.04), Vector3(-0.67, 1.45, 1.095), trim_material))
+	root.add_child(_box_mesh("BackShelf", Vector3(1.15, 0.07, 0.18), Vector3(1.05, 0.88, 1.02), accent_material))
+	root.add_child(_box_mesh("SmallBookA", Vector3(0.10, 0.28, 0.16), Vector3(0.72, 1.04, 0.90), trim_material))
+	root.add_child(_box_mesh("SmallBookB", Vector3(0.10, 0.22, 0.16), Vector3(0.86, 1.01, 0.90), glass_material))
+
+	var world: WorldEnvironment = WorldEnvironment.new()
+	world.name = "SoftAmbientWorld"
+	var env: Environment = Environment.new()
+	env.background_mode = Environment.BG_COLOR
+	env.background_color = Color(0.09, 0.10, 0.12)
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = Color(0.72, 0.67, 0.58)
+	env.ambient_light_energy = 0.35
+	world.environment = env
+	add_child(world)
 
 
 func _build_ui() -> void:
@@ -77,7 +121,7 @@ func _build_debug_panel(canvas: CanvasLayer) -> void:
 	var panel: PanelContainer = PanelContainer.new()
 	panel.name = "DebugPanel"
 	panel.position = Vector2(12.0, 12.0)
-	panel.custom_minimum_size = Vector2(420.0, 260.0)
+	panel.custom_minimum_size = Vector2(440.0, 292.0)
 	canvas.add_child(panel)
 
 	var margin: MarginContainer = MarginContainer.new()
@@ -200,12 +244,15 @@ func _refresh_debug_ui() -> void:
 	var now: float = Time.get_unix_time_from_system()
 	var packet_age_s: float = maxf(0.0, now - _last_packet_unix_time)
 	var connection_health: String = "backend stale / sleeping" if _sleeping_due_to_stale else "backend active/waiting"
+	var face_x_text: String = _optional_debug_value(engagement.get("face_x_norm", null))
+	var face_y_text: String = _optional_debug_value(engagement.get("face_y_norm", null))
 
 	var lines: Array[String] = []
-	lines.append("LeLamp Milestone 4.3.2 Frontend")
+	lines.append("LeLamp Milestone 4.3.3 Frontend")
 	lines.append("UDP commands: %s" % _receiver_status)
 	lines.append("Text input: browser chat at http://127.0.0.1:8765")
 	lines.append("Health: %s  age: %.1fs" % [connection_health, packet_age_s])
+	lines.append("Backend stale sleep: %s" % ("yes" if _sleeping_due_to_stale else "no"))
 	lines.append("View: front-three-quarter / local -Z")
 	lines.append("State: %s" % str(_last_command.get("state", "unknown")))
 	lines.append("Motion: %s" % str(behavior.get("motion", "none")))
@@ -217,6 +264,7 @@ func _refresh_debug_ui() -> void:
 		float(engagement.get("confidence", 0.0))
 	])
 	lines.append("Reason: %s" % str(engagement.get("reason", "none")))
+	lines.append("Face follow hint: x=%s  y=%s" % [face_x_text, face_y_text])
 	lines.append("Packet timestamp: %s" % str(_last_command.get("timestamp", "never")))
 	lines.append("Local received: %s" % _last_packet_local_time)
 	lines.append("Recall panel: %s" % ("visible" if _response_panel != null and _response_panel.visible else "hidden"))
@@ -227,6 +275,31 @@ func _refresh_debug_ui() -> void:
 			debug_text += "\n"
 		debug_text += line
 	_debug_label.text = debug_text
+
+
+func _optional_debug_value(value: Variant) -> String:
+	var value_type: int = typeof(value)
+	if value_type == TYPE_FLOAT or value_type == TYPE_INT:
+		return "%.2f" % float(value)
+	return "n/a"
+
+
+func _box_mesh(node_name: String, size: Vector3, position: Vector3, material: Material) -> MeshInstance3D:
+	var instance: MeshInstance3D = MeshInstance3D.new()
+	instance.name = node_name
+	var mesh: BoxMesh = BoxMesh.new()
+	mesh.size = size
+	instance.mesh = mesh
+	instance.position = position
+	instance.material_override = material
+	return instance
+
+
+func _make_env_material(color: Color, roughness: float) -> StandardMaterial3D:
+	var mat: StandardMaterial3D = StandardMaterial3D.new()
+	mat.albedo_color = color
+	mat.roughness = clampf(roughness, 0.0, 1.0)
+	return mat
 
 
 func _default_command() -> Dictionary:

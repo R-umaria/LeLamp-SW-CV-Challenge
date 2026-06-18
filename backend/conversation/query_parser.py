@@ -147,6 +147,9 @@ OBJECT_PHRASE_PATTERNS = [
 POSSESSIVE_TARGET_PATTERN = re.compile(rf"\bmy\s+{_TARGET_TEXT}")
 
 LIST_OBJECTS_PATTERNS = [
+    re.compile(r"\bwhat\s+objects\s+do\s+you\s+see\b"),
+    re.compile(r"\bwhat\s+can\s+you\s+see\b"),
+    re.compile(r"\bwhat\s+are\s+you\s+seeing\b"),
     re.compile(r"\bwhat\s+(?:objects|things|items)\s+did\s+you\s+(?:detect|see|remember)\b"),
     re.compile(r"\bwhat\s+do\s+you\s+remember\s+seeing\b"),
     re.compile(r"\bwhat\s+have\s+you\s+(?:seen|detected)\b"),
