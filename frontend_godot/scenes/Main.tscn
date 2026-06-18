@@ -18,3 +18,5 @@ autostart = false
 current = true
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+
+[node name="FillLight3D" type="OmniLight3D" parent="."]

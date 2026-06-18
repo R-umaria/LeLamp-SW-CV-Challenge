@@ -1,11 +1,15 @@
 extends Node3D
 
 @export var response_visible_seconds: float = 8.0
+@export var camera_position: Vector3 = Vector3(2.85, 2.05, -4.65)
+@export var camera_target: Vector3 = Vector3(0.0, 1.22, 0.0)
+@export var camera_fov_degrees: float = 48.0
 
 @onready var udp_receiver: Node = $UdpCommandReceiver
-@onready var lamp: Node = $LampRig
+@onready var lamp: Node3D = $LampRig
 @onready var camera: Camera3D = $Camera3D
 @onready var sun: DirectionalLight3D = $DirectionalLight3D
+@onready var fill_light: OmniLight3D = $FillLight3D
 
 var _debug_label: Label
 var _response_panel: PanelContainer
@@ -37,12 +41,22 @@ func _process(_delta: float) -> void:
 
 
 func _setup_camera_and_light() -> void:
-	camera.position = Vector3(0.0, 2.0, 5.2)
-	camera.look_at(Vector3(0.0, 1.35, 0.0), Vector3.UP)
-	camera.fov = 45.0
+	# The lamp head and visible cone point along the rig's local -Z axis.
+	# Put the camera on that front side with a slight X offset so the final demo
+	# shows the face, cone, head tilt, and arm joints at the same time.
+	lamp.rotation_degrees = Vector3.ZERO
+	camera.position = camera_position
+	camera.look_at(camera_target, Vector3.UP)
+	camera.fov = camera_fov_degrees
+	camera.current = true
 
-	sun.rotation_degrees = Vector3(-45.0, 35.0, 0.0)
-	sun.light_energy = 1.4
+	# Key light from the viewer/front side; fill light keeps the back arm joints readable.
+	sun.rotation_degrees = Vector3(-38.0, -32.0, 0.0)
+	sun.light_energy = 1.45
+
+	fill_light.position = Vector3(-2.3, 2.7, -2.4)
+	fill_light.light_energy = 0.9
+	fill_light.omni_range = 6.0
 
 
 func _build_ui() -> void:
@@ -57,7 +71,7 @@ func _build_debug_panel(canvas: CanvasLayer) -> void:
 	var panel: PanelContainer = PanelContainer.new()
 	panel.name = "DebugPanel"
 	panel.position = Vector2(12.0, 12.0)
-	panel.custom_minimum_size = Vector2(410.0, 210.0)
+	panel.custom_minimum_size = Vector2(410.0, 230.0)
 	canvas.add_child(panel)
 
 	var margin: MarginContainer = MarginContainer.new()
@@ -77,7 +91,7 @@ func _build_response_panel(canvas: CanvasLayer) -> void:
 	_response_panel = PanelContainer.new()
 	_response_panel.name = "RecallResponsePanel"
 	_response_panel.position = Vector2(440.0, 12.0)
-	_response_panel.custom_minimum_size = Vector2(520.0, 150.0)
+	_response_panel.custom_minimum_size = Vector2(560.0, 165.0)
 	_response_panel.visible = false
 	canvas.add_child(_response_panel)
 
@@ -93,7 +107,7 @@ func _build_response_panel(canvas: CanvasLayer) -> void:
 	margin.add_child(vbox)
 
 	var title: Label = Label.new()
-	title.text = "LeLamp recall"
+	title.text = "LeLamp recall answer"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	vbox.add_child(title)
 
@@ -159,8 +173,9 @@ func _refresh_debug_ui() -> void:
 	var speech_text: String = "" if speech_value == null else str(speech_value)
 
 	var lines: Array[String] = []
-	lines.append("LeLamp Milestone 4.1 Frontend")
+	lines.append("LeLamp Milestone 4.2 Frontend")
 	lines.append("UDP: %s" % _receiver_status)
+	lines.append("View: front-three-quarter / local -Z")
 	lines.append("State: %s" % str(_last_command.get("state", "unknown")))
 	lines.append("Motion: %s" % str(behavior.get("motion", "none")))
 	lines.append("Light: %s" % str(behavior.get("light", "none")))

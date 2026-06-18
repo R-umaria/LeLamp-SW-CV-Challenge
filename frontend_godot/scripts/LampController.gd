@@ -11,6 +11,7 @@ var lamp_head_tilt: Node3D
 var spot_light: SpotLight3D
 var head_material: StandardMaterial3D
 var cone_material: StandardMaterial3D
+var front_marker_material: StandardMaterial3D
 
 var current_state := "idle"
 var current_motion := "idle_breathe"
@@ -73,6 +74,7 @@ func _build_lamp_rig() -> void:
 	var arm_material := _make_material(Color(0.72, 0.72, 0.76), false)
 	head_material = _make_material(Color(1.0, 0.86, 0.48), true)
 	cone_material = _make_transparent_material(Color(1.0, 0.82, 0.30, 0.18))
+	front_marker_material = _make_material(Color(0.15, 0.45, 1.0), true)
 
 	base_yaw = Node3D.new()
 	base_yaw.name = "BaseYaw_DOF1"
@@ -141,10 +143,21 @@ func _build_lamp_rig() -> void:
 	spot_light.light_energy = 1.4
 	lamp_head_tilt.add_child(spot_light)
 
-	var cone := _cone_mesh("VisibleLightCone", 0.24, 1.1, cone_material)
+	var cone: MeshInstance3D = _cone_mesh("VisibleLightCone", 0.24, 1.1, cone_material)
 	cone.position = Vector3(0.0, -0.02, -0.62)
 	cone.rotation_degrees = Vector3(90.0, 0.0, 0.0)
 	lamp_head_tilt.add_child(cone)
+
+	# Final-demo polish: this marker makes the lamp's local -Z/front side
+	# unambiguous from the camera view without changing the 6-DOF animation axes.
+	var front_lens_marker: MeshInstance3D = _cylinder_mesh("FrontLookMarker", 0.07, 0.018, front_marker_material)
+	front_lens_marker.position = Vector3(0.0, -0.02, -0.275)
+	front_lens_marker.rotation_degrees = Vector3(90.0, 0.0, 0.0)
+	lamp_head_tilt.add_child(front_lens_marker)
+
+	var look_tip: MeshInstance3D = _sphere_mesh("LookDirectionTip", 0.045, front_marker_material)
+	look_tip.position = Vector3(0.0, -0.02, -0.43)
+	lamp_head_tilt.add_child(look_tip)
 
 
 func _clear_children() -> void:
@@ -219,6 +232,9 @@ func _update_light(_delta: float) -> void:
 
 	if head_material != null:
 		head_material.emission_energy_multiplier = energy * 0.55
+
+	if front_marker_material != null:
+		front_marker_material.emission_energy_multiplier = 0.7 + energy * 0.25
 
 	if cone_material != null:
 		var alpha: float = clampf(0.10 + energy * 0.06, 0.10, 0.26)

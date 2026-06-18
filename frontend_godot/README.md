@@ -1,12 +1,18 @@
-# LeLamp Milestone 2 Godot Frontend
+# LeLamp Godot Frontend
 
-This is a lightweight Godot embodiment layer for the LeLamp challenge prototype. It receives backend behavior commands over UDP and maps the bounded command fields to placeholder 6-DOF lamp animations.
+This is the lightweight Godot embodiment layer for the LeLamp challenge prototype. It receives bounded backend behavior commands over UDP and maps them to controlled 6-DOF placeholder lamp animations.
 
-Godot does **not** make engagement, memory, or behavior decisions. The Python backend remains the intelligence layer.
+Godot does **not** make engagement, memory, recall, or behavior decisions. The Python backend remains the intelligence layer.
 
 ## Recommended version
 
 Use Godot 4.6.3 stable or newer Godot 4.x stable. The project uses basic Godot 4 nodes, primitive meshes, GDScript, and `PacketPeerUDP`; it does not require C#/.NET.
+
+## Milestone 4.2 visual polish
+
+Milestone 4.2 changes the default camera to a front-three-quarter view. The lamp head and visible light cone point along the rig's local `-Z` axis, so the camera is now placed on that front side with a slight side offset. This makes the head, front marker, light cone, arm joints, and recall answer panel visible in the final demo.
+
+The 6-DOF animation axes are unchanged. The polish is primarily camera placement, lighting, and a small visible front/look marker on the lamp head.
 
 ## Folder layout
 
@@ -32,17 +38,19 @@ Main (Node3D) [Main.gd]
 ├── UdpCommandReceiver (Node) [UdpCommandReceiver.gd]
 ├── LampRig (instance of LampRig.tscn)
 ├── Camera3D
-└── DirectionalLight3D
+├── DirectionalLight3D
+└── FillLight3D
 ```
 
 Runtime-created UI:
 
 ```text
 Main
-└── DebugCanvas (CanvasLayer)
-    └── DebugPanel (PanelContainer)
-        └── MarginContainer
-            └── DebugLabel (Label)
+└── LeLampCanvas (CanvasLayer)
+    ├── DebugPanel (PanelContainer)
+    │   └── DebugLabel (Label)
+    └── RecallResponsePanel (PanelContainer)
+        └── RecallResponseLabel (Label)
 ```
 
 Runtime-created lamp rig under `LampRig`:
@@ -64,14 +72,16 @@ LampRig (Node3D) [LampController.gd]
                         ├── LampHead
                         ├── LampShade
                         ├── LampSpotLight
-                        └── VisibleLightCone
+                        ├── VisibleLightCone
+                        ├── FrontLookMarker
+                        └── LookDirectionTip
 ```
 
 The six controlled placeholder degrees of freedom are base yaw, shoulder pitch, elbow pitch, wrist pitch, wrist yaw, and lamp head tilt.
 
 ## Incoming UDP protocol
 
-The receiver expects one JSON object per UDP packet, preserving the existing backend command protocol:
+The receiver expects one JSON object per UDP packet, preserving the backend command protocol:
 
 ```json
 {
@@ -94,6 +104,8 @@ The receiver expects one JSON object per UDP packet, preserving the existing bac
 }
 ```
 
+Milestone 4.2 does not change this schema.
+
 ## Behavior mapping
 
 | Backend command | Godot placeholder animation |
@@ -103,64 +115,54 @@ The receiver expects one JSON object per UDP packet, preserving the existing bac
 | `disengaged` / `searching_glance` | Sweeping base and wrist glance |
 | `seeking_attention` / `curious_tilt` + `soft_pulse` | Curious tilt and brighter pulsing light |
 | `scanning` | Wider base sweep and scan light |
-| `recalling` / `thinking` | Slight tilted thinking pose and focus glow |
+| `recalling` / `thinking` + `focus_glow` | Thinking pose, focus glow, and visible recall answer panel |
 
 ## Run the frontend
 
 1. Open Godot.
 2. Click **Import**.
-3. Select `lelamp_challenge/frontend_godot/project.godot`.
+3. Select `frontend_godot/project.godot`.
 4. Open the imported project.
 5. Press **F5** or click **Run Project**.
 6. Confirm the debug panel says `Listening on udp://0.0.0.0:4242`.
+7. Confirm the lamp is visible from a front-three-quarter view and the light cone/front marker points toward the camera.
 
 ## Test without webcam
 
 From the project root:
 
-```bash
-python -m backend.tools.send_test_commands --count 24 --interval 1.0
-```
-
-PowerShell:
-
 ```powershell
 python -m backend.tools.send_test_commands --count 24 --interval 1.0
 ```
 
-Expected result: the debug panel cycles through `idle`, `engaged`, `disengaged`, `seeking_attention`, `scanning`, and `recalling`, and the lamp changes motion/light behavior on each packet.
+Expected result: the debug panel cycles through `idle`, `engaged`, `disengaged`, `seeking_attention`, `scanning`, and `recalling`; the lamp changes motion/light behavior on each packet; the recall answer panel appears during the `recalling` command.
 
 ## Connect the real backend
 
-Start Godot first, then from the project root run the backend with UDP enabled:
+Start Godot first, then run this from the project root:
 
-```bash
-python -m backend.main --show-window --godot-udp --godot-host 127.0.0.1 --godot-port 4242
+```powershell
+python -m backend.main --show-window --godot-udp --godot-host 127.0.0.1 --godot-port 4242 --enable-objects --object-model yolov8n.pt --save-object-frames --interactive-recall --memory-db data/scene_memory.sqlite
 ```
 
-Tuned dark-room command with Godot enabled:
-
-```bash
-python -m backend.main --show-window --godot-udp --smoothing-window 9 --min-state-dwell 1.0 --exit-disengaged-frames 7 --exit-absent-frames 10 --min-candidate-area-ratio 0.012 --min-face-area-ratio 0.022
-```
-
-The backend still writes isolated logs under `logs/runs/<run_id>/` and mirrors the latest run to `logs/latest/` unless `--no-latest` is used.
+The backend writes isolated logs under `logs/runs/<run_id>/` and mirrors the latest run to `logs/latest/` unless `--no-latest` is used.
 
 ## Scope boundaries
 
-Included in Milestone 2:
+Included:
 
 - UDP receive loop in Godot.
 - Primitive 6-DOF lamp rig.
 - Controlled placeholder motion and light animations.
+- Front-three-quarter demo camera.
+- Visible front/look marker and light cone.
 - Visible debug UI.
-- Python UDP sender and webcam-free test sender.
+- Visible recall response panel.
 
-Not included yet:
+Not included:
 
+- Voice input.
+- Text-to-speech.
 - Inverse kinematics.
 - Imported 3D art/model.
-- Object detection.
-- Memory storage.
-- LLM recall.
 - Real servo control.
