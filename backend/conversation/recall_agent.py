@@ -30,18 +30,20 @@ from backend.memory.memory_store import MemoryRecord, MemoryStore
 
 STRICT_GROUNDED_RECALL_PROMPT = """You are the voice of a LeLamp-inspired robotic lamp.
 
-You must answer the user's object-location question using only the provided memory record.
-Do not use outside knowledge.
-Do not infer, guess, or invent a location.
-Do not say where the object is now. Only say where it was last seen.
-Do not mention objects that are not in the memory record.
-Do not mention nearby objects or spatial relationships unless they are explicitly in the memory record.
-Do not mention frame paths, files, IDs, JSON, logs, or implementation details.
-If the memory record is missing or insufficient, say: "I do not remember seeing that."
-Keep the answer to one short conversational sentence.
+You are only a phrasing layer. A valid SQLite memory record has already been retrieved.
+Use only that memory record and the grounded template sentence below.
 
-Required answer style:
-I last saw your <object> on the <location> around <time>. My confidence was <confidence>.
+Hard rules:
+- Do not use outside knowledge.
+- Do not infer, guess, or invent a location.
+- Do not say where the object is now. Only say where it was last seen.
+- Do not mention nearby objects or spatial relationships unless they are explicitly in the memory record.
+- Do not mention frame paths, files, IDs, JSON, logs, or implementation details.
+- Because a valid memory record is provided, do not say that you do not remember seeing the object.
+- Keep the answer to one short conversational sentence.
+
+Preferred answer:
+{grounded_template_answer}
 
 User question:
 {user_query}
@@ -52,7 +54,7 @@ Parsed target object:
 Memory record JSON:
 {memory_record_json}
 
-Answer:"""
+Answer with one sentence only:"""
 
 
 @dataclass(frozen=True)
@@ -188,7 +190,18 @@ class RecallAgent:
                 llm_error = llm_response.error
                 llm_fallback_reason = llm_response.fallback_reason
                 if llm_response.used_llm and llm_response.text:
-                    final_answer = _clean_llm_text(llm_response.text)
+                    candidate_answer = _clean_llm_text(llm_response.text)
+                    is_grounded, validation_reason = _validate_llm_grounding(
+                        candidate_answer, parsed, memory_record
+                    )
+                    if is_grounded:
+                        final_answer = candidate_answer
+                        llm_used = True
+                    else:
+                        final_answer = fallback_answer
+                        llm_used = False
+                        llm_fallback_reason = validation_reason
+                        llm_error = f"invalid_llm_response: {validation_reason}"
                 else:
                     final_answer = fallback_answer
 
@@ -246,6 +259,7 @@ def build_grounded_prompt(user_query: str, parsed: ParsedObjectQuery, memory_rec
     return STRICT_GROUNDED_RECALL_PROMPT.format(
         user_query=user_query,
         parsed_object=parsed.normalized_label or "",
+        grounded_template_answer=deterministic_recall_answer(parsed, memory_record),
         memory_record_json=json.dumps(_memory_record_for_prompt(memory_record), ensure_ascii=False, indent=2),
     )
 
@@ -301,6 +315,87 @@ def _clean_llm_text(text: str) -> str:
         if cleaned.startswith(prefix):
             cleaned = cleaned[len(prefix) :].strip()
     return cleaned
+
+
+def _validate_llm_grounding(
+    answer: str,
+    parsed: ParsedObjectQuery,
+    memory_record: MemoryRecord | None,
+) -> tuple[bool, str | None]:
+    """Accept an LLM answer only if it is consistent with retrieved memory.
+
+    This is the critical safety valve for local LLM use. Connectivity and a
+    non-empty generated response are not enough. If SQLite retrieval found a
+    record, the displayed/spoken response must not contradict that record or
+    omit the actual stored location. Invalid responses fall back to the
+    deterministic grounded template.
+    """
+
+    if memory_record is None:
+        return False, "no_memory_record"
+
+    cleaned = " ".join(str(answer or "").strip().split())
+    if not cleaned:
+        return False, "empty_llm_answer"
+
+    lowered = cleaned.lower()
+
+    contradictory_phrases = (
+        "do not remember",
+        "don't remember",
+        "dont remember",
+        "not remember",
+        "no memory",
+        "can't remember",
+        "cannot remember",
+        "do not recall",
+        "don't recall",
+        "have not seen",
+        "haven't seen",
+        "never seen",
+    )
+    if any(phrase in lowered for phrase in contradictory_phrases):
+        return False, "contradicts_retrieved_memory"
+
+    implementation_leaks = (
+        "frame_path",
+        "frame path",
+        ".jpg",
+        ".png",
+        "data\\",
+        "data/",
+        "json",
+        "sqlite",
+        "memory id",
+    )
+    if any(marker in lowered for marker in implementation_leaks):
+        return False, "implementation_detail_leak"
+
+    expected_location = str(memory_record.location_label or "").strip().lower()
+    if expected_location and expected_location not in lowered:
+        return False, "missing_stored_location"
+
+    object_terms = {
+        str(memory_record.normalized_label or "").strip().lower(),
+        str(memory_record.object_label or "").strip().lower(),
+        str(parsed.normalized_label or "").strip().lower(),
+        str(parsed.target_text or "").strip().lower(),
+    }
+    object_terms = {term for term in object_terms if term}
+    if object_terms and not any(term in lowered for term in object_terms):
+        return False, "missing_target_object"
+
+    expected_confidence_options = {
+        f"{float(memory_record.confidence):.2f}",
+        f"{float(memory_record.confidence):.3f}",
+    }
+    has_confidence = any(conf in lowered for conf in expected_confidence_options)
+    has_timestamp = str(memory_record.timestamp or "").strip().lower() in lowered
+
+    if not has_confidence and not has_timestamp:
+        return False, "missing_confidence_or_timestamp"
+
+    return True, None
 
 
 def _coerce_paths(paths: str | Path | Iterable[str | Path] | None) -> list[Path]:
