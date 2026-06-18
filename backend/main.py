@@ -36,6 +36,7 @@ from backend.utils.config import (
     StateMachineConfig,
 )
 from backend.utils.logging_utils import setup_logging
+from backend.utils.run_paths import create_run_paths, write_latest_pointer
 
 
 def parse_args() -> argparse.Namespace:
@@ -45,7 +46,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument("--seek-after", type=float, default=5.0)
     parser.add_argument("--emit-interval", type=float, default=1.0)
-    parser.add_argument("--log-dir", type=str, default="logs")
+    parser.add_argument("--log-dir", type=str, default="logs", help="Root log directory. Each run writes under <log-dir>/runs/<run_id>/")
+    parser.add_argument("--run-id", type=str, default=None, help="Optional explicit run id. Defaults to timestamp YYYY-MM-DD_HH-MM-SS.")
+    parser.add_argument("--no-latest", action="store_true", help="Do not mirror this run into logs/latest.")
     parser.add_argument("--max-frames", type=int, default=0, help="0 means run until q/Esc/Ctrl-C")
 
     parser.add_argument("--smoothing-window", type=int, default=7)
@@ -67,10 +70,15 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def append_jsonl(path: Path, payload: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+def append_jsonl(paths: Path | list[Path] | tuple[Path, ...], payload: dict) -> None:
+    if isinstance(paths, Path):
+        output_paths = [paths]
+    else:
+        output_paths = list(paths)
+    for path in output_paths:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
 def build_configs(args: argparse.Namespace) -> tuple[CameraConfig, EngagementConfig, SmoothingConfig, StateMachineConfig, RuntimeConfig]:
@@ -106,16 +114,33 @@ def main() -> int:
     args = parse_args()
     camera_config, engagement_config, smoothing_config, state_config, runtime_config = build_configs(args)
 
-    logger = setup_logging(runtime_config.log_dir)
-    latency_logger = LatencyLogger(Path(runtime_config.log_dir) / "latency.csv")
-    commands_path = Path(runtime_config.log_dir) / "commands.jsonl"
+    run_paths = create_run_paths(
+        log_root=runtime_config.log_dir,
+        run_id=args.run_id,
+        mirror_latest=not args.no_latest,
+    )
+    write_latest_pointer(run_paths.log_root, run_paths.run_dir)
+
+    latest_latency_path = None if args.no_latest else run_paths.latest_latency_path
+    latest_commands_path = None if args.no_latest else run_paths.latest_commands_path
+    latest_runtime_log_paths = [] if args.no_latest else [run_paths.latest_runtime_log_path]
+
+    logger = setup_logging(run_paths.run_dir, extra_runtime_log_paths=latest_runtime_log_paths)
+    latency_paths = [run_paths.latency_path] + ([latest_latency_path] if latest_latency_path else [])
+    latency_logger = LatencyLogger(latency_paths)
+    command_paths = [run_paths.commands_path] + ([latest_commands_path] if latest_commands_path else [])
+    commands_path = run_paths.commands_path
 
     camera = OpenCVCamera(camera_config.index, camera_config.width, camera_config.height)
     detector = FaceEngagementDetector(engagement_config)
     smoother = EngagementSmoother(smoothing_config)
     fsm = InteractionStateMachine(state_config)
 
-    logger.info("Starting Milestone 1.5 stabilized backend")
+    logger.info("Starting Milestone 1.5.1 backend with isolated run logging")
+    logger.info("Run id=%s", run_paths.run_id)
+    logger.info("Run directory=%s", run_paths.run_dir)
+    if not args.no_latest:
+        logger.info("Latest mirror directory=%s", run_paths.latest_dir)
     logger.info("Camera index=%s size=%sx%s", camera_config.index, camera_config.width, camera_config.height)
     logger.info(
         "Stability config smoothing_window=%s min_dwell=%.2fs exit_disengaged_frames=%s exit_absent_frames=%s min_face_area=%.3f min_candidate_area=%.3f",
@@ -181,7 +206,7 @@ def main() -> int:
 
             if should_emit:
                 print(json.dumps(command, ensure_ascii=False), flush=True)
-                append_jsonl(commands_path, command)
+                append_jsonl(command_paths, command)
                 last_emit_at = now
 
             latency_logger.append(
@@ -244,7 +269,7 @@ def main() -> int:
         camera.release()
         if runtime_config.show_window:
             cv2.destroyAllWindows()
-        logger.info("Stopped Milestone 1.5 backend")
+        logger.info("Stopped Milestone 1.5.1 backend")
 
     return 0
 
