@@ -90,6 +90,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--use-llm", action="store_true", help="Use Ollama/local LLM only to phrase retrieved memory answers.")
     parser.add_argument("--ollama-url", type=str, default="http://localhost:11434", help="Ollama base URL for --use-llm.")
     parser.add_argument("--ollama-model", type=str, default="llama3.2", help="Ollama model for recall phrasing, e.g. llama3.2 or qwen2.5.")
+    parser.add_argument("--ollama-timeout", type=float, default=8.0, help="Ollama generate timeout in seconds for recall phrasing.")
 
     window_group = parser.add_mutually_exclusive_group()
     window_group.add_argument("--show-window", action="store_true", default=True)
@@ -260,6 +261,7 @@ def main() -> int:
             use_llm=args.use_llm,
             ollama_url=args.ollama_url,
             ollama_model=args.ollama_model,
+            ollama_timeout_s=args.ollama_timeout,
             log_paths=recall_log_paths,
             logger=logger,
         )
@@ -297,11 +299,12 @@ def main() -> int:
     )
     logger.info("Commands will be saved to %s", commands_path)
     logger.info(
-        "Recall config interactive=%s use_llm=%s ollama_url=%s ollama_model=%s",
+        "Recall config interactive=%s use_llm=%s ollama_url=%s ollama_model=%s ollama_timeout=%.1fs",
         args.interactive_recall,
         args.use_llm,
         args.ollama_url,
         args.ollama_model,
+        args.ollama_timeout,
     )
     if godot_udp_config.enabled:
         logger.info("Commands will also be streamed to Godot via udp://%s:%s", godot_udp_config.host, godot_udp_config.port)
@@ -330,6 +333,9 @@ def main() -> int:
             memory_write_ms = ""
             memory_retrieval_ms = ""
             llm_response_ms = ""
+            llm_attempted = ""
+            llm_used = ""
+            llm_error = ""
             memory_write_count = 0
             memory_duplicate_skip_count = 0
             now = time.monotonic()
@@ -423,6 +429,9 @@ def main() -> int:
                     llm_response_ms = (
                         "" if recall_result.llm_response_ms is None else round(recall_result.llm_response_ms, 3)
                     )
+                    llm_attempted = recall_result.llm_attempted
+                    llm_used = recall_result.llm_used
+                    llm_error = recall_result.llm_error or ""
                     recall_command = build_behavior_command(
                         state=LampState.RECALLING,
                         engagement=smoothed_engagement,
@@ -439,9 +448,11 @@ def main() -> int:
                     last_godot_udp_send_ms = godot_sender.send(recall_command)
                     last_emit_at = time.monotonic()
                     logger.info(
-                        "Sent recall command to Godot state=recalling parsed_object=%s memory_id=%s",
+                        "Sent recall command to Godot state=recalling parsed_object=%s memory_id=%s llm_attempted=%s llm_used=%s",
                         recall_result.parsed_object,
                         recall_result.memory_record.id if recall_result.memory_record else None,
+                        recall_result.llm_attempted,
+                        recall_result.llm_used,
                     )
 
             latency_logger.append(
@@ -454,6 +465,9 @@ def main() -> int:
                     "memory_write_ms": memory_write_ms,
                     "memory_retrieval_ms": memory_retrieval_ms,
                     "llm_response_ms": llm_response_ms,
+                    "llm_attempted": llm_attempted,
+                    "llm_used": llm_used,
+                    "llm_error": llm_error,
                     "smoothing_ms": round(smoothing_ms, 3),
                     "state_machine_ms": round(state_machine_ms, 3),
                     "command_build_ms": round(command_ms, 3),

@@ -134,3 +134,12 @@ frontend_godot/imported/
 # OS noise
 .DS_Store
 Thumbs.db
+
+# Additional local runtime/model artifacts
+*.sqlite
+*.sqlite3
+*.db
+*.db-*
+data/*.db
+frontend_godot/.mono/
+frontend_godot/export_presets.cfg

@@ -1,19 +1,25 @@
 extends Node3D
 
+@export var response_visible_seconds: float = 8.0
+
 @onready var udp_receiver: Node = $UdpCommandReceiver
 @onready var lamp: Node = $LampRig
 @onready var camera: Camera3D = $Camera3D
 @onready var sun: DirectionalLight3D = $DirectionalLight3D
 
 var _debug_label: Label
-var _receiver_status := "starting"
+var _response_panel: PanelContainer
+var _response_label: Label
+var _receiver_status: String = "starting"
 var _last_command: Dictionary = {}
-var _last_packet_local_time := "never"
+var _last_packet_local_time: String = "never"
+var _response_visible_until: float = 0.0
+var _last_response_text: String = ""
 
 
 func _ready() -> void:
 	_setup_camera_and_light()
-	_build_debug_ui()
+	_build_ui()
 
 	udp_receiver.command_received.connect(_on_command_received)
 	udp_receiver.receiver_status_changed.connect(_on_receiver_status_changed)
@@ -22,10 +28,12 @@ func _ready() -> void:
 	_last_command = _default_command()
 	lamp.apply_command(_last_command)
 	_refresh_debug_ui()
+	_update_response_panel()
 
 
 func _process(_delta: float) -> void:
 	_refresh_debug_ui()
+	_update_response_panel()
 
 
 func _setup_camera_and_light() -> void:
@@ -37,18 +45,22 @@ func _setup_camera_and_light() -> void:
 	sun.light_energy = 1.4
 
 
-func _build_debug_ui() -> void:
-	var canvas := CanvasLayer.new()
-	canvas.name = "DebugCanvas"
+func _build_ui() -> void:
+	var canvas: CanvasLayer = CanvasLayer.new()
+	canvas.name = "LeLampCanvas"
 	add_child(canvas)
+	_build_debug_panel(canvas)
+	_build_response_panel(canvas)
 
-	var panel := PanelContainer.new()
+
+func _build_debug_panel(canvas: CanvasLayer) -> void:
+	var panel: PanelContainer = PanelContainer.new()
 	panel.name = "DebugPanel"
-	panel.position = Vector2(12, 12)
-	panel.custom_minimum_size = Vector2(390, 190)
+	panel.position = Vector2(12.0, 12.0)
+	panel.custom_minimum_size = Vector2(410.0, 210.0)
 	canvas.add_child(panel)
 
-	var margin := MarginContainer.new()
+	var margin: MarginContainer = MarginContainer.new()
 	margin.add_theme_constant_override("margin_left", 10)
 	margin.add_theme_constant_override("margin_top", 8)
 	margin.add_theme_constant_override("margin_right", 10)
@@ -61,6 +73,37 @@ func _build_debug_ui() -> void:
 	margin.add_child(_debug_label)
 
 
+func _build_response_panel(canvas: CanvasLayer) -> void:
+	_response_panel = PanelContainer.new()
+	_response_panel.name = "RecallResponsePanel"
+	_response_panel.position = Vector2(440.0, 12.0)
+	_response_panel.custom_minimum_size = Vector2(520.0, 150.0)
+	_response_panel.visible = false
+	canvas.add_child(_response_panel)
+
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 16)
+	margin.add_theme_constant_override("margin_top", 12)
+	margin.add_theme_constant_override("margin_right", 16)
+	margin.add_theme_constant_override("margin_bottom", 12)
+	_response_panel.add_child(margin)
+
+	var vbox: VBoxContainer = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 8)
+	margin.add_child(vbox)
+
+	var title: Label = Label.new()
+	title.text = "LeLamp recall"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	vbox.add_child(title)
+
+	_response_label = Label.new()
+	_response_label.name = "RecallResponseLabel"
+	_response_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_response_label.text = ""
+	vbox.add_child(_response_label)
+
+
 func _on_receiver_status_changed(message: String) -> void:
 	_receiver_status = message
 	_refresh_debug_ui()
@@ -70,20 +113,53 @@ func _on_command_received(command: Dictionary) -> void:
 	_last_command = command
 	_last_packet_local_time = Time.get_datetime_string_from_system(false, true)
 	lamp.apply_command(command)
+	_maybe_show_recall_response(command)
 	_refresh_debug_ui()
+
+
+func _maybe_show_recall_response(command: Dictionary) -> void:
+	var state_text: String = str(command.get("state", ""))
+	var behavior: Dictionary = _dictionary_value(command, "behavior")
+	var speech_value: Variant = behavior.get("speech_text", null)
+	var speech_text: String = "" if speech_value == null else str(speech_value).strip_edges()
+	if state_text == "recalling" and speech_text != "":
+		_show_response_text(speech_text)
+
+
+func _dictionary_value(source: Dictionary, key: String) -> Dictionary:
+	var value: Variant = source.get(key, {})
+	if typeof(value) == TYPE_DICTIONARY:
+		return value as Dictionary
+	return {}
+
+
+func _show_response_text(text: String) -> void:
+	_last_response_text = text
+	_response_visible_until = Time.get_unix_time_from_system() + response_visible_seconds
+	if _response_label != null:
+		_response_label.text = text
+	if _response_panel != null:
+		_response_panel.visible = true
+
+
+func _update_response_panel() -> void:
+	if _response_panel == null:
+		return
+	var now: float = Time.get_unix_time_from_system()
+	_response_panel.visible = _last_response_text != "" and now < _response_visible_until
 
 
 func _refresh_debug_ui() -> void:
 	if _debug_label == null:
 		return
 
-	var engagement: Dictionary = _last_command.get("engagement", {})
-	var behavior: Dictionary = _last_command.get("behavior", {})
+	var engagement: Dictionary = _dictionary_value(_last_command, "engagement")
+	var behavior: Dictionary = _dictionary_value(_last_command, "behavior")
 	var speech_value: Variant = behavior.get("speech_text", "")
-	var speech_text := "" if speech_value == null else str(speech_value)
+	var speech_text: String = "" if speech_value == null else str(speech_value)
 
 	var lines: Array[String] = []
-	lines.append("LeLamp Milestone 2 Frontend")
+	lines.append("LeLamp Milestone 4.1 Frontend")
 	lines.append("UDP: %s" % _receiver_status)
 	lines.append("State: %s" % str(_last_command.get("state", "unknown")))
 	lines.append("Motion: %s" % str(behavior.get("motion", "none")))
@@ -97,9 +173,10 @@ func _refresh_debug_ui() -> void:
 	lines.append("Reason: %s" % str(engagement.get("reason", "none")))
 	lines.append("Packet timestamp: %s" % str(_last_command.get("timestamp", "never")))
 	lines.append("Local received: %s" % _last_packet_local_time)
+	lines.append("Recall panel: %s" % ("visible" if _response_panel != null and _response_panel.visible else "hidden"))
 
-	var text := ""
-	for line in lines:
+	var text: String = ""
+	for line: String in lines:
 		if text != "":
 			text += "\n"
 		text += line
