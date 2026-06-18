@@ -114,3 +114,23 @@ venv.bak/
 # JetBrains IDEs
 .idea/
 *.iml
+
+# LeLamp runtime artifacts
+logs/
+test_logs/
+data/*.sqlite
+data/*.sqlite-*
+data/object_frames/
+data/captures/
+captures/
+*.pt
+*.onnx
+
+# Godot generated/editor cache
+frontend_godot/.godot/
+frontend_godot/.import/
+frontend_godot/imported/
+
+# OS noise
+.DS_Store
+Thumbs.db

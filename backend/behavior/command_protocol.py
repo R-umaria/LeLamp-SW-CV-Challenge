@@ -26,7 +26,7 @@ def build_behavior_command(
             "speech_text": behavior.get("speech_text"),
         },
         "memory": {
-            # Milestone 1 intentionally has no object detector yet.
+            # This field is stable across Milestones 3-4 and is consumed by the Godot overlay.
             "last_detected_objects": list(last_detected_objects or []),
         },
     }

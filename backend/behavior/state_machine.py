@@ -20,6 +20,7 @@ class LampState(str, Enum):
     ENGAGED = "engaged"
     DISENGAGED = "disengaged"
     SEEKING_ATTENTION = "seeking_attention"
+    RECALLING = "recalling"
 
 
 @dataclass(frozen=True)

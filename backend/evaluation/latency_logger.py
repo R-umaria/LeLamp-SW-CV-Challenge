@@ -1,4 +1,4 @@
-"""CSV latency logger for Milestone 1.5+ / Milestone 3 evaluation."""
+"""CSV latency logger for engagement, memory, and recall evaluation."""
 
 from __future__ import annotations
 
@@ -15,6 +15,8 @@ class LatencyLogger:
         "engagement_detection_ms",
         "object_detection_ms",
         "memory_write_ms",
+        "memory_retrieval_ms",
+        "llm_response_ms",
         "smoothing_ms",
         "state_machine_ms",
         "command_build_ms",

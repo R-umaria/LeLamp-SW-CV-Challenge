@@ -30,6 +30,12 @@ BEHAVIOR_BY_STATE: dict[LampState, dict] = {
         "sound": "gentle_chime",
         "speech_text": None,
     },
+    LampState.RECALLING: {
+        "motion": "thinking",
+        "light": "focus_glow",
+        "sound": None,
+        "speech_text": None,
+    },
 }
 
 

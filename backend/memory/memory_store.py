@@ -176,6 +176,24 @@ class MemoryStore:
             ).fetchall()
         return [self._row_to_record(row) for row in rows]
 
+    def find_latest_by_normalized_label(self, normalized_label: str) -> MemoryRecord | None:
+        """Return the latest exact normalized-label match for grounded recall."""
+        normalized = normalized_label.strip().lower()
+        if not normalized:
+            return None
+
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM object_memory
+                WHERE lower(normalized_label) = ?
+                ORDER BY timestamp DESC
+                LIMIT 1
+                """,
+                (normalized,),
+            ).fetchone()
+        return self._row_to_record(row) if row else None
+
     def find_recent_duplicate(
         self,
         normalized_label: str,
