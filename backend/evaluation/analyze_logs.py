@@ -334,7 +334,7 @@ def main() -> int:
     start_dt, end_dt = run_time_bounds(runtime_start, runtime_stop, latency_points, command_points, transitions)
     duration_s = (end_dt - start_dt).total_seconds() if start_dt and end_dt else None
 
-    print("LeLamp Milestone 1.5.1 Run Summary")
+    print("LeLamp Milestone 2-Compatible Run Summary")
     print("===================================")
     print(f"run_dir: {run_dir}")
     print(f"run_start: {format_dt(start_dt)}")
@@ -361,9 +361,12 @@ def main() -> int:
     latency_fields = [
         "capture_ms",
         "engagement_detection_ms",
+        "object_detection_ms",
+        "memory_write_ms",
         "smoothing_ms",
         "state_machine_ms",
         "command_build_ms",
+        "godot_udp_send_ms",
         "total_loop_ms",
     ]
     printed_latency = False

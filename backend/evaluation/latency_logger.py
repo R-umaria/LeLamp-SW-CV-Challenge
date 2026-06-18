@@ -1,4 +1,4 @@
-"""CSV latency logger for Milestone 1.5+ evaluation."""
+"""CSV latency logger for Milestone 1.5+ / Milestone 3 evaluation."""
 
 from __future__ import annotations
 
@@ -13,9 +13,12 @@ class LatencyLogger:
         "frame_index",
         "capture_ms",
         "engagement_detection_ms",
+        "object_detection_ms",
+        "memory_write_ms",
         "smoothing_ms",
         "state_machine_ms",
         "command_build_ms",
+        "godot_udp_send_ms",
         "total_loop_ms",
         "fps",
         "state",
@@ -31,6 +34,9 @@ class LatencyLogger:
         "raw_face_count",
         "candidate_count",
         "selected_face_score",
+        "object_count",
+        "memory_write_count",
+        "memory_duplicate_skip_count",
         "consecutive_engaged",
         "consecutive_disengaged",
         "consecutive_absent",

@@ -1,13 +1,13 @@
-"""Configuration defaults for the LeLamp backend vertical slice.
+"""Configuration defaults for the LeLamp backend.
 
-Milestone 1.5 keeps the system dependency-light and deterministic, but adds the
-stability controls needed for dark-room webcam testing: candidate filtering,
-primary-face continuity, temporal smoothing, hysteresis, and state dwell time.
+Milestone 3 preserves the stable engagement/FSM/Godot path and adds optional
+object detection plus SQLite scene memory. Object detection is disabled unless
+explicitly enabled from the CLI.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -92,12 +92,63 @@ class RuntimeConfig:
 
 
 @dataclass(frozen=True)
+class GodotUdpConfig:
+    # Milestone 2 local embodiment bridge. Disabled by default so Milestone 1.5.1
+    # behavior remains unchanged unless explicitly enabled.
+    enabled: bool = False
+    host: str = "127.0.0.1"
+    port: int = 4242
+    max_packet_bytes: int = 8192
+
+
+@dataclass(frozen=True)
+class ObjectDetectionConfig:
+    # Disabled by default to preserve the stable engagement-only run path.
+    enabled: bool = False
+    model_path: str = "yolov8n.pt"
+    interval_s: float = 2.0
+    confidence: float = 0.35
+    max_objects_per_frame: int = 8
+    allowed_labels: set[str] = field(
+        default_factory=lambda: {
+            "cell phone",
+            "laptop",
+            "keyboard",
+            "mouse",
+            "book",
+            "cup",
+            "bottle",
+            "remote",
+            "scissors",
+            "clock",
+            "vase",
+            "backpack",
+            "handbag",
+            "chair",
+            "tv",
+            "monitor",
+        }
+    )
+
+
+@dataclass(frozen=True)
+class MemoryConfig:
+    db_path: str = "data/scene_memory.sqlite"
+    dedupe_window_s: float = 8.0
+    save_object_frames: bool = False
+    frame_dir: str = "data/object_frames"
+
+
+@dataclass(frozen=True)
 class AppConfig:
     camera: CameraConfig = CameraConfig()
     engagement: EngagementConfig = EngagementConfig()
     smoothing: SmoothingConfig = SmoothingConfig()
     state_machine: StateMachineConfig = StateMachineConfig()
     runtime: RuntimeConfig = RuntimeConfig()
+    godot_udp: GodotUdpConfig = GodotUdpConfig()
+    objects: ObjectDetectionConfig = ObjectDetectionConfig()
+    memory: MemoryConfig = MemoryConfig()
 
 
 DEFAULT_CONFIG = AppConfig()

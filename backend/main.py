@@ -1,11 +1,11 @@
-"""Milestone 1.5 stabilized backend vertical slice.
+"""LeLamp backend vertical slice with optional Milestone 3 scene memory.
 
 Run from the project root with:
     python -m backend.main --show-window
 
-This opens the webcam, estimates engagement from face presence/position, smooths
-noisy frame-level predictions, updates a hysteresis-based finite state machine,
-emits protocol-shaped JSON commands, and logs latency/debug fields.
+Milestone 3 adds optional object detection and SQLite scene memory while
+preserving the stable engagement detector, temporal smoothing, FSM, isolated run
+logs, command JSON shape, and Godot UDP frontend bridge.
 """
 
 from __future__ import annotations
@@ -23,14 +23,20 @@ except ImportError as exc:  # pragma: no cover - dependency guard
 
 from backend.behavior.behavior_policy import behavior_for_state
 from backend.behavior.command_protocol import build_behavior_command
+from backend.behavior.godot_udp_sender import GodotUdpSender
 from backend.behavior.state_machine import InteractionStateMachine
 from backend.evaluation.latency_logger import LatencyLogger
+from backend.memory.scene_memory import SceneMemory
 from backend.perception.camera import OpenCVCamera
 from backend.perception.engagement_detector import FaceEngagementDetector, draw_engagement_overlay
+from backend.perception.object_detector import YoloObjectDetector, draw_object_overlay
 from backend.perception.temporal_smoother import EngagementSmoother
 from backend.utils.config import (
     CameraConfig,
     EngagementConfig,
+    GodotUdpConfig,
+    MemoryConfig,
+    ObjectDetectionConfig,
     RuntimeConfig,
     SmoothingConfig,
     StateMachineConfig,
@@ -40,12 +46,15 @@ from backend.utils.run_paths import create_run_paths, write_latest_pointer
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="LeLamp Milestone 1.5 stabilized backend")
+    parser = argparse.ArgumentParser(description="LeLamp Milestone 3 backend: engagement + optional object memory")
     parser.add_argument("--camera-index", type=int, default=0)
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument("--seek-after", type=float, default=5.0)
     parser.add_argument("--emit-interval", type=float, default=1.0)
+    parser.add_argument("--godot-udp", action="store_true", help="Enable best-effort UDP command streaming to the Godot frontend.")
+    parser.add_argument("--godot-host", type=str, default="127.0.0.1", help="Godot UDP host. Use 127.0.0.1 for local demo.")
+    parser.add_argument("--godot-port", type=int, default=4242, help="Godot UDP listen port.")
     parser.add_argument("--log-dir", type=str, default="logs", help="Root log directory. Each run writes under <log-dir>/runs/<run_id>/")
     parser.add_argument("--run-id", type=str, default=None, help="Optional explicit run id. Defaults to timestamp YYYY-MM-DD_HH-MM-SS.")
     parser.add_argument("--no-latest", action="store_true", help="Do not mirror this run into logs/latest.")
@@ -64,6 +73,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min-candidate-area-ratio", type=float, default=0.010)
     parser.add_argument("--cascade-min-neighbors", type=int, default=6)
 
+    parser.add_argument("--enable-objects", action="store_true", help="Enable optional YOLO object detection and scene-memory writes.")
+    parser.add_argument("--object-model", type=str, default="yolov8n.pt", help="Ultralytics YOLO model path/name, e.g. yolov8n.pt")
+    parser.add_argument("--object-interval", type=float, default=2.0, help="Seconds between object-detection passes.")
+    parser.add_argument("--memory-db", type=str, default="data/scene_memory.sqlite", help="SQLite scene-memory database path.")
+    parser.add_argument("--save-object-frames", action="store_true", help="Save annotated evidence frames when a memory record is written.")
+    parser.add_argument("--object-confidence", type=float, default=0.35, help="YOLO confidence threshold for object detection.")
+    parser.add_argument("--memory-dedupe-window", type=float, default=8.0, help="Seconds to suppress repeated same-object/same-location memory writes.")
+    parser.add_argument("--object-frame-dir", type=str, default="data/object_frames", help="Directory for saved object evidence frames.")
+
     window_group = parser.add_mutually_exclusive_group()
     window_group.add_argument("--show-window", action="store_true", default=True)
     window_group.add_argument("--no-window", action="store_false", dest="show_window")
@@ -81,7 +99,18 @@ def append_jsonl(paths: Path | list[Path] | tuple[Path, ...], payload: dict) -> 
             f.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
-def build_configs(args: argparse.Namespace) -> tuple[CameraConfig, EngagementConfig, SmoothingConfig, StateMachineConfig, RuntimeConfig]:
+def build_configs(
+    args: argparse.Namespace,
+) -> tuple[
+    CameraConfig,
+    EngagementConfig,
+    SmoothingConfig,
+    StateMachineConfig,
+    RuntimeConfig,
+    GodotUdpConfig,
+    ObjectDetectionConfig,
+    MemoryConfig,
+]:
     camera_config = CameraConfig(index=args.camera_index, width=args.width, height=args.height)
     engagement_config = EngagementConfig(
         center_tolerance_x=args.center_tolerance_x,
@@ -107,12 +136,47 @@ def build_configs(args: argparse.Namespace) -> tuple[CameraConfig, EngagementCon
         log_dir=args.log_dir,
         show_window=args.show_window,
     )
-    return camera_config, engagement_config, smoothing_config, state_config, runtime_config
+    godot_udp_config = GodotUdpConfig(
+        enabled=args.godot_udp,
+        host=args.godot_host,
+        port=args.godot_port,
+    )
+    object_config = ObjectDetectionConfig(
+        enabled=args.enable_objects,
+        model_path=args.object_model,
+        interval_s=max(0.1, args.object_interval),
+        confidence=args.object_confidence,
+    )
+    memory_config = MemoryConfig(
+        db_path=args.memory_db,
+        dedupe_window_s=max(0.0, args.memory_dedupe_window),
+        save_object_frames=args.save_object_frames,
+        frame_dir=args.object_frame_dir,
+    )
+    return (
+        camera_config,
+        engagement_config,
+        smoothing_config,
+        state_config,
+        runtime_config,
+        godot_udp_config,
+        object_config,
+        memory_config,
+    )
 
 
 def main() -> int:
     args = parse_args()
-    camera_config, engagement_config, smoothing_config, state_config, runtime_config = build_configs(args)
+    (
+        camera_config,
+        engagement_config,
+        smoothing_config,
+        state_config,
+        runtime_config,
+        godot_udp_config,
+        object_config,
+        memory_config,
+    ) = build_configs(args)
 
     run_paths = create_run_paths(
         log_root=runtime_config.log_dir,
@@ -130,13 +194,16 @@ def main() -> int:
     latency_logger = LatencyLogger(latency_paths)
     command_paths = [run_paths.commands_path] + ([latest_commands_path] if latest_commands_path else [])
     commands_path = run_paths.commands_path
+    godot_sender = GodotUdpSender(godot_udp_config, logger=logger)
 
     camera = OpenCVCamera(camera_config.index, camera_config.width, camera_config.height)
     detector = FaceEngagementDetector(engagement_config)
     smoother = EngagementSmoother(smoothing_config)
     fsm = InteractionStateMachine(state_config)
+    object_detector = YoloObjectDetector(object_config, logger=logger)
+    scene_memory = SceneMemory(memory_config, logger=logger)
 
-    logger.info("Starting Milestone 1.5.1 backend with isolated run logging")
+    logger.info("Starting Milestone 3 backend with isolated run logging")
     logger.info("Run id=%s", run_paths.run_id)
     logger.info("Run directory=%s", run_paths.run_dir)
     if not args.no_latest:
@@ -151,11 +218,31 @@ def main() -> int:
         engagement_config.min_face_area_ratio,
         engagement_config.min_candidate_area_ratio,
     )
+    logger.info(
+        "Object config enabled=%s active=%s model=%s interval=%.2fs confidence=%.2f",
+        object_config.enabled,
+        object_detector.enabled,
+        object_config.model_path,
+        object_config.interval_s,
+        object_config.confidence,
+    )
+    logger.info(
+        "Memory config db=%s save_frames=%s dedupe_window=%.1fs",
+        memory_config.db_path,
+        memory_config.save_object_frames,
+        memory_config.dedupe_window_s,
+    )
     logger.info("Commands will be saved to %s", commands_path)
+    if godot_udp_config.enabled:
+        logger.info("Commands will also be streamed to Godot via udp://%s:%s", godot_udp_config.host, godot_udp_config.port)
 
     frame_count = 0
     last_emit_at = 0.0
+    last_object_detection_at = 0.0
     fps_ema = 0.0
+    last_godot_udp_send_ms = None
+    last_detected_objects: list[dict] = []
+    display_detections = []
 
     try:
         camera.open()
@@ -168,6 +255,48 @@ def main() -> int:
             t0 = time.perf_counter()
             raw_engagement = detector.detect(frame)
             engagement_ms = (time.perf_counter() - t0) * 1000.0
+
+            object_detection_ms = ""
+            memory_write_ms = ""
+            memory_write_count = 0
+            memory_duplicate_skip_count = 0
+            now = time.monotonic()
+            should_detect_objects = object_detector.enabled and (
+                last_object_detection_at == 0.0 or (now - last_object_detection_at >= object_config.interval_s)
+            )
+            if should_detect_objects:
+                t0 = time.perf_counter()
+                display_detections = object_detector.detect(frame)
+                object_detection_ms = round((time.perf_counter() - t0) * 1000.0, 3)
+                last_object_detection_at = now
+
+                if display_detections:
+                    logger.info(
+                        "Detected objects count=%s objects=%s latency_ms=%.3f",
+                        len(display_detections),
+                        [d.to_log_dict() for d in display_detections],
+                        object_detection_ms,
+                    )
+                else:
+                    logger.info("Detected objects count=0 latency_ms=%.3f", object_detection_ms)
+
+                memory_result = scene_memory.observe(
+                    display_detections,
+                    frame=frame,
+                    frame_index=frame_count,
+                    source="webcam",
+                )
+                last_detected_objects = memory_result.command_objects
+                memory_write_ms = round(memory_result.memory_write_ms, 3)
+                memory_write_count = len(memory_result.written_records)
+                memory_duplicate_skip_count = memory_result.skipped_duplicates
+                logger.info(
+                    "Object memory update detections=%s writes=%s duplicates=%s memory_write_ms=%.3f",
+                    len(display_detections),
+                    memory_write_count,
+                    memory_duplicate_skip_count,
+                    memory_result.memory_write_ms,
+                )
 
             t0 = time.perf_counter()
             smoothed_engagement = smoother.update(raw_engagement)
@@ -183,7 +312,7 @@ def main() -> int:
                 state=transition.current_state,
                 engagement=smoothed_engagement,
                 behavior=behavior,
-                last_detected_objects=[],
+                last_detected_objects=last_detected_objects,
             )
             command_ms = (time.perf_counter() - t0) * 1000.0
 
@@ -207,6 +336,7 @@ def main() -> int:
             if should_emit:
                 print(json.dumps(command, ensure_ascii=False), flush=True)
                 append_jsonl(command_paths, command)
+                last_godot_udp_send_ms = godot_sender.send(command)
                 last_emit_at = now
 
             latency_logger.append(
@@ -215,9 +345,12 @@ def main() -> int:
                     "frame_index": frame_count,
                     "capture_ms": round(camera_frame.capture_latency_ms, 3),
                     "engagement_detection_ms": round(engagement_ms, 3),
+                    "object_detection_ms": object_detection_ms,
+                    "memory_write_ms": memory_write_ms,
                     "smoothing_ms": round(smoothing_ms, 3),
                     "state_machine_ms": round(state_machine_ms, 3),
                     "command_build_ms": round(command_ms, 3),
+                    "godot_udp_send_ms": "" if last_godot_udp_send_ms is None else round(last_godot_udp_send_ms, 3),
                     "total_loop_ms": round(total_ms, 3),
                     "fps": round(fps_ema, 2),
                     "state": transition.current_state.value,
@@ -233,6 +366,9 @@ def main() -> int:
                     "raw_face_count": raw_engagement.raw_face_count,
                     "candidate_count": raw_engagement.candidate_count,
                     "selected_face_score": round(smoothed_engagement.selected_face_score, 3),
+                    "object_count": len(display_detections) if object_detector.enabled else 0,
+                    "memory_write_count": memory_write_count,
+                    "memory_duplicate_skip_count": memory_duplicate_skip_count,
                     "consecutive_engaged": transition.consecutive_engaged,
                     "consecutive_disengaged": transition.consecutive_disengaged,
                     "consecutive_absent": transition.consecutive_absent,
@@ -249,7 +385,9 @@ def main() -> int:
                     fps=fps_ema,
                     config=engagement_config,
                 )
-                cv2.imshow("LeLamp Milestone 1.5 - Stabilized Engagement/FSM", frame)
+                if object_detector.enabled:
+                    draw_object_overlay(frame, display_detections)
+                cv2.imshow("LeLamp Milestone 3 - Engagement/FSM/Object Memory", frame)
                 key = cv2.waitKey(1) & 0xFF
                 if key in (27, ord("q")):
                     logger.info("Quit requested from preview window")
@@ -266,10 +404,11 @@ def main() -> int:
         logger.exception("Backend stopped due to error: %s", exc)
         return 1
     finally:
+        godot_sender.close()
         camera.release()
         if runtime_config.show_window:
             cv2.destroyAllWindows()
-        logger.info("Stopped Milestone 1.5.1 backend")
+        logger.info("Stopped Milestone 3 backend")
 
     return 0
 

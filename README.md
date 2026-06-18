@@ -148,3 +148,89 @@ python -m backend.evaluation.analyze_logs --latest
 ```
 
 5. Move to Godot only if flicker is low, centered engagement is stable, absent/photo-frame-only does not repeatedly trigger engaged, and `seeking_attention` appears only after sustained disengagement.
+
+---
+
+# Milestone 2 Add-on: Godot UDP Frontend
+
+Milestone 2 adds a lightweight Godot 3D embodiment layer while preserving the Milestone 1.5.1 backend protocol and isolated logging.
+
+## What changed
+
+Added:
+
+```text
+backend/behavior/godot_udp_sender.py
+backend/tools/send_test_commands.py
+frontend_godot/
+  project.godot
+  scenes/Main.tscn
+  scenes/LampRig.tscn
+  scripts/Main.gd
+  scripts/UdpCommandReceiver.gd
+  scripts/LampController.gd
+  assets/
+  README.md
+```
+
+Modified:
+
+```text
+backend/main.py
+backend/utils/config.py
+backend/evaluation/latency_logger.py
+backend/evaluation/analyze_logs.py
+```
+
+The backend still emits and saves the same command JSON shape:
+
+```text
+timestamp, state, engagement, behavior, memory
+```
+
+## Godot setup
+
+Use Godot 4.6.3 stable or newer Godot 4.x stable. Open:
+
+```text
+frontend_godot/project.godot
+```
+
+Run the project. The debug panel should show UDP listening on port `4242`.
+
+## Webcam-free frontend test
+
+```powershell
+python -m backend.tools.send_test_commands --count 24 --interval 1.0
+```
+
+## Real backend + Godot
+
+Start Godot first, then run:
+
+```powershell
+python -m backend.main --show-window --godot-udp --godot-host 127.0.0.1 --godot-port 4242
+```
+
+Tuned command with Godot enabled:
+
+```powershell
+python -m backend.main --show-window --godot-udp --smoothing-window 9 --min-state-dwell 1.0 --exit-disengaged-frames 7 --exit-absent-frames 10 --min-candidate-area-ratio 0.012 --min-face-area-ratio 0.022
+```
+
+## Milestone 2 pass/fail
+
+Pass if:
+
+- Godot receives test packets and updates the debug UI.
+- The lamp cycles through `idle_breathe`, `attentive_nod`, `searching_glance`, `curious_tilt`, `scanning`, and `thinking`.
+- The real backend streams commands when `--godot-udp` is enabled.
+- The real backend still writes `logs/runs/<run_id>/commands.jsonl` and `latency.csv`.
+- The real backend does not crash when Godot is closed.
+
+Fail if:
+
+- Godot makes engagement/memory/behavior decisions.
+- The backend command JSON shape changes.
+- Command logging breaks.
+- The frontend requires object detection, memory, LLM, IK, or imported models to run.
