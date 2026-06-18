@@ -154,6 +154,11 @@ HAD_OBJECT_PATTERNS = [
     re.compile(rf"\bdid\s+you\s+notice\s+if\s+i\s+(?:had|have|was\s+holding|was\s+using)\s+(?:my\s+|the\s+|a\s+|an\s+)?{_TARGET_TEXT}"),
 ]
 
+EXISTENCE_OBJECT_PATTERNS = [
+    re.compile(rf"\bwas\s+there\s+(?:any\s+|a\s+|an\s+|the\s+)?{_TARGET_TEXT}"),
+    re.compile(rf"\bwere\s+there\s+(?:any\s+|some\s+)?{_TARGET_TEXT}"),
+]
+
 
 @dataclass(frozen=True)
 class ParsedObjectQuery:
@@ -223,6 +228,23 @@ def parse_object_query(query: str, aliases: dict[str, str] | None = None) -> Par
                 normalized_label=normalized or None,
                 confidence=0.86,
                 strategy="had_object_pattern",
+            )
+
+    # Existence phrasing for final-demo queries such as:
+    # "Was there any pen in the view?"
+    for pattern in EXISTENCE_OBJECT_PATTERNS:
+        match = pattern.search(cleaned)
+        if not match:
+            continue
+        target = _sanitize_object_phrase(match.group("object"))
+        if target:
+            normalized = _normalize_with_aliases(target, alias_map)
+            return ParsedObjectQuery(
+                original_query=query,
+                target_text=target,
+                normalized_label=normalized or None,
+                confidence=0.82,
+                strategy="existence_object_pattern",
             )
 
     # Strongest signal: explicit possessive target. This fixes questions like

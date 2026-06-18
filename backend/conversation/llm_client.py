@@ -1,9 +1,9 @@
 """Local Ollama client for structured, grounded conversation responses.
 
-Milestone 4.3 intentionally uses Ollama's ``/api/chat`` endpoint instead of
-raw ``/api/generate`` phrasing. The model is constrained with a JSON schema and
-all callers still validate the returned facts against SQLite memory before the
-answer is trusted.
+Milestone 4.3.1 keeps Ollama behind a bounded, validated interface. It uses
+``/api/chat`` with ``stream=false``, optional JSON schema output, configurable
+connect/read timeouts, and ``keep_alive`` so a homelab model can stay warm during
+the demo.
 """
 
 from __future__ import annotations
@@ -45,10 +45,8 @@ class OllamaStatus:
 class LLMResponse:
     """Result from a local LLM request.
 
-    ``text`` is the raw assistant content. ``json_data`` is populated only when
-    the raw content parsed as a JSON object. ``used_llm`` means Ollama returned a
-    non-empty response; it does *not* mean the answer is trusted. Trust is decided
-    later by the recall validator.
+    ``used_llm`` means Ollama returned non-empty model content. It does not mean
+    the answer is trusted; the recall validator decides whether to use it.
     """
 
     text: str
@@ -77,12 +75,18 @@ class OllamaClient:
     def __init__(
         self,
         base_url: str = "http://localhost:11434",
-        model: str = "llama3.2",
-        timeout_s: float = 8.0,
+        model: str = "qwen2.5:1.5b",
+        timeout_s: float = 90.0,
+        connect_timeout_s: float = 5.0,
+        keep_alive: str = "1h",
+        temperature: float = 0.0,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout_s = float(timeout_s)
+        self.connect_timeout_s = float(connect_timeout_s)
+        self.keep_alive = keep_alive
+        self.temperature = float(temperature)
 
     def check_connectivity(self) -> OllamaStatus:
         """Return whether Ollama is reachable and whether the requested model exists."""
@@ -90,7 +94,7 @@ class OllamaClient:
         start = time.perf_counter()
         request = urllib.request.Request(url=f"{self.base_url}/api/tags", method="GET")
         try:
-            with urllib.request.urlopen(request, timeout=min(self.timeout_s, 3.0)) as response:
+            with urllib.request.urlopen(request, timeout=max(0.1, self.connect_timeout_s)) as response:
                 raw = response.read().decode("utf-8")
             parsed = json.loads(raw)
             model_names = _extract_model_names(parsed)
@@ -105,15 +109,38 @@ class OllamaClient:
                 error=None if model_available else f"model_not_found: {self.model}",
                 available_models=tuple(model_names),
             )
+        except TimeoutError as exc:
+            elapsed_ms = (time.perf_counter() - start) * 1000.0
+            return OllamaStatus(False, self.base_url, self.model, False, elapsed_ms, f"ollama_connect_timeout: {exc}")
         except urllib.error.URLError as exc:
             elapsed_ms = (time.perf_counter() - start) * 1000.0
             return OllamaStatus(False, self.base_url, self.model, False, elapsed_ms, f"ollama_connection_error: {exc}")
-        except TimeoutError as exc:
-            elapsed_ms = (time.perf_counter() - start) * 1000.0
-            return OllamaStatus(False, self.base_url, self.model, False, elapsed_ms, f"ollama_timeout: {exc}")
         except Exception as exc:  # pragma: no cover - defensive runtime guard
             elapsed_ms = (time.perf_counter() - start) * 1000.0
             return OllamaStatus(False, self.base_url, self.model, False, elapsed_ms, f"ollama_status_error: {exc}")
+
+    def warm_up(self) -> LLMResponse:
+        """Warm the selected model with a tiny chat call.
+
+        This is intentionally separate from recall so validation failures do not
+        hide model-load latency. ``keep_alive`` controls how long Ollama keeps the
+        model loaded after this request.
+        """
+
+        schema = {
+            "type": "object",
+            "properties": {"ok": {"type": "boolean"}, "message": {"type": "string"}},
+            "required": ["ok", "message"],
+            "additionalProperties": False,
+        }
+        return self.chat_json(
+            [
+                {"role": "system", "content": "Return a tiny JSON object for a readiness check."},
+                {"role": "user", "content": "Return {\"ok\": true, \"message\": \"ready\"}."},
+            ],
+            schema,
+            max_tokens=32,
+        )
 
     def chat_json(
         self,
@@ -130,8 +157,9 @@ class OllamaClient:
             "messages": [dict(message) for message in messages],
             "stream": False,
             "format": dict(schema),
+            "keep_alive": self.keep_alive,
             "options": {
-                "temperature": 0.0,
+                "temperature": self.temperature,
                 "top_p": 0.8,
                 "num_predict": int(max_tokens),
             },
@@ -145,7 +173,7 @@ class OllamaClient:
         )
 
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
+            with urllib.request.urlopen(request, timeout=max(self.timeout_s, self.connect_timeout_s)) as response:
                 raw = response.read().decode("utf-8")
             parsed = json.loads(raw)
             message = parsed.get("message", {})
@@ -193,16 +221,6 @@ class OllamaClient:
                 error=f"ollama_http_error_{exc.code}: {body_text or exc.reason}",
                 fallback_reason="http_error",
             )
-        except urllib.error.URLError as exc:
-            elapsed_ms = (time.perf_counter() - start) * 1000.0
-            return LLMResponse(
-                text="",
-                attempted=True,
-                used_llm=False,
-                latency_ms=elapsed_ms,
-                error=f"ollama_connection_error: {exc}",
-                fallback_reason="connection_error",
-            )
         except TimeoutError as exc:
             elapsed_ms = (time.perf_counter() - start) * 1000.0
             return LLMResponse(
@@ -212,6 +230,26 @@ class OllamaClient:
                 latency_ms=elapsed_ms,
                 error=f"ollama_timeout: {exc}",
                 fallback_reason="timeout",
+            )
+        except urllib.error.URLError as exc:
+            elapsed_ms = (time.perf_counter() - start) * 1000.0
+            reason = getattr(exc, "reason", None)
+            if isinstance(reason, TimeoutError):
+                return LLMResponse(
+                    text="",
+                    attempted=True,
+                    used_llm=False,
+                    latency_ms=elapsed_ms,
+                    error=f"ollama_timeout: {reason}",
+                    fallback_reason="timeout",
+                )
+            return LLMResponse(
+                text="",
+                attempted=True,
+                used_llm=False,
+                latency_ms=elapsed_ms,
+                error=f"ollama_connection_error: {exc}",
+                fallback_reason="connection_error",
             )
         except Exception as exc:  # pragma: no cover - defensive runtime guard
             elapsed_ms = (time.perf_counter() - start) * 1000.0
@@ -288,29 +326,53 @@ def _read_error_body(exc: urllib.error.HTTPError) -> str:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Test Ollama connectivity for LeLamp grounded recall")
+    parser = argparse.ArgumentParser(description="Test/warm Ollama connectivity for LeLamp grounded recall")
     parser.add_argument("--ollama-url", type=str, default="http://localhost:11434")
-    parser.add_argument("--ollama-model", type=str, default="llama3.2")
-    parser.add_argument("--ollama-timeout", type=float, default=8.0)
+    parser.add_argument("--ollama-model", type=str, default="qwen2.5:1.5b")
+    parser.add_argument("--llm-timeout", type=float, default=90.0)
+    parser.add_argument("--llm-connect-timeout", type=float, default=5.0)
+    parser.add_argument("--ollama-keep-alive", type=str, default="1h")
+    parser.add_argument("--warm-ollama", action="store_true")
     parser.add_argument("--json", action="store_true")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    client = OllamaClient(args.ollama_url, args.ollama_model, timeout_s=args.ollama_timeout)
+    client = OllamaClient(
+        args.ollama_url,
+        args.ollama_model,
+        timeout_s=args.llm_timeout,
+        connect_timeout_s=args.llm_connect_timeout,
+        keep_alive=args.ollama_keep_alive,
+    )
     status = client.check_connectivity()
+    warm = None
+    if status.ok and status.model_available and args.warm_ollama:
+        warm = client.warm_up()
+    payload = status.to_dict()
+    if warm is not None:
+        payload["warm_up"] = warm.to_dict()
     if args.json:
-        print(json.dumps(status.to_dict(), ensure_ascii=False, indent=2))
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         if status.ok and status.model_available:
             print(f"Ollama OK: {status.base_url} has model {status.model} ({status.latency_ms:.1f} ms)")
+            if warm is not None:
+                print(
+                    f"Warm-up attempted={warm.attempted} used_llm={warm.used_llm} "
+                    f"latency_ms={warm.latency_ms:.1f} error={warm.error or 'none'}"
+                )
         elif status.ok:
             print(f"Ollama reachable, but model '{status.model}' was not found.")
             print("Available models: " + (", ".join(status.available_models) or "none"))
         else:
             print(f"Ollama unavailable: {status.error}")
-    return 0 if status.ok and status.model_available else 1
+    if not (status.ok and status.model_available):
+        return 1
+    if warm is not None and not warm.used_llm:
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

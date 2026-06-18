@@ -56,6 +56,8 @@ _OBJECT_RECALL_SIGNALS = [
     re.compile(r"\bhave\s+you\s+seen\b"),
     re.compile(r"\bdid\s+you\s+(?:see|notice)\s+if\s+i\s+(?:had|have|was\s+holding|was\s+using)\b"),
     re.compile(r"\bdid\s+you\s+see\b"),
+    re.compile(r"\bwas\s+there\s+(?:any|a|an|the)\b"),
+    re.compile(r"\bwere\s+there\s+(?:any|some)\b"),
     re.compile(r"\b(?:find|locate)\b"),
 ]
 

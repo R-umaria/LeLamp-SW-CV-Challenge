@@ -41,6 +41,14 @@ class QueryParserTests(unittest.TestCase):
         self.assertIsNone(parsed.normalized_label, msg=parsed.to_dict())
         self.assertEqual(parsed.strategy, "list_recent_objects_query")
 
+    def test_where_last_bottle(self) -> None:
+        self.assert_parses_to("Where did you last see my bottle?", "bottle")
+
+    def test_was_there_any_pen_in_view(self) -> None:
+        parsed = parse_object_query("Was there any pen in the view?")
+        self.assertEqual(parsed.normalized_label, "pen", msg=parsed.to_dict())
+        self.assertEqual(parsed.strategy, "existence_object_pattern")
+
 
 if __name__ == "__main__":
     unittest.main()

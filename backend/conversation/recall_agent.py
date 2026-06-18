@@ -124,8 +124,10 @@ class RecallAgent:
         use_llm: bool = False,
         llm_required: bool = False,
         ollama_url: str = "http://localhost:11434",
-        ollama_model: str = "llama3.2",
-        ollama_timeout_s: float = 8.0,
+        ollama_model: str = "qwen2.5:1.5b",
+        llm_timeout_s: float = 90.0,
+        llm_connect_timeout_s: float = 5.0,
+        ollama_keep_alive: str = "1h",
         recent_object_limit: int = 8,
         log_paths: str | Path | Iterable[str | Path] | None = None,
         logger: logging.Logger | None = None,
@@ -141,7 +143,13 @@ class RecallAgent:
         self.ollama_status: OllamaStatus | None = None
 
         if self.use_llm:
-            self.ollama = OllamaClient(base_url=ollama_url, model=ollama_model, timeout_s=ollama_timeout_s)
+            self.ollama = OllamaClient(
+                base_url=ollama_url,
+                model=ollama_model,
+                timeout_s=llm_timeout_s,
+                connect_timeout_s=llm_connect_timeout_s,
+                keep_alive=ollama_keep_alive,
+            )
             self.ollama_status = self.ollama.check_connectivity()
             if self.ollama_status.ok and self.ollama_status.model_available:
                 self.logger.info(
@@ -610,9 +618,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--use-llm", action="store_true", help="Use Ollama/local LLM only to phrase retrieved memory answers")
     parser.add_argument("--llm-required", action="store_true", help="Return nonzero if an LLM-eligible answer falls back")
     parser.add_argument("--ollama-url", type=str, default="http://localhost:11434", help="Ollama base URL")
-    parser.add_argument("--ollama-model", type=str, default="llama3.2", help="Ollama model, e.g. llama3.2 or qwen2.5")
-    parser.add_argument("--ollama-timeout", type=float, default=8.0, help="Ollama chat timeout in seconds")
+    parser.add_argument("--ollama-model", type=str, default="qwen2.5:1.5b", help="Ollama model, e.g. qwen2.5:1.5b")
+    parser.add_argument("--llm-timeout", type=float, default=90.0, help="Ollama full chat/read timeout in seconds")
+    parser.add_argument("--llm-connect-timeout", type=float, default=5.0, help="Ollama connection/status timeout in seconds")
+    parser.add_argument("--ollama-keep-alive", type=str, default="1h", help="Ollama keep_alive duration, e.g. 1h")
+    parser.add_argument("--ollama-timeout", type=float, default=None, help="Backward-compatible alias for --llm-timeout")
     parser.add_argument("--test-ollama", action="store_true", help="Check Ollama connectivity/model availability and exit")
+    parser.add_argument("--warm-ollama", action="store_true", help="Warm the selected Ollama model and exit")
     parser.add_argument("--json", action="store_true", help="Print machine-readable recall result JSON")
     parser.add_argument("--debug", action="store_true", help="Print debug metadata such as frame_path outside the spoken answer")
     parser.add_argument("--log-path", type=str, default="logs/recall.jsonl", help="JSONL recall log path")
@@ -622,20 +634,43 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
 
-    if args.test_ollama:
-        client = OllamaClient(args.ollama_url, args.ollama_model, timeout_s=args.ollama_timeout)
+    llm_timeout = float(args.ollama_timeout) if args.ollama_timeout is not None else float(args.llm_timeout)
+
+    if args.test_ollama or args.warm_ollama:
+        client = OllamaClient(
+            args.ollama_url,
+            args.ollama_model,
+            timeout_s=llm_timeout,
+            connect_timeout_s=args.llm_connect_timeout,
+            keep_alive=args.ollama_keep_alive,
+        )
         status = client.check_connectivity()
+        warm_response = None
+        if status.ok and status.model_available and args.warm_ollama:
+            warm_response = client.warm_up()
+        payload = status.to_dict()
+        if warm_response is not None:
+            payload["warm_up"] = warm_response.to_dict()
         if args.json:
-            print(json.dumps(status.to_dict(), ensure_ascii=False, indent=2))
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
         else:
             if status.ok and status.model_available:
                 print(f"Ollama OK: {status.base_url} has model {status.model} ({status.latency_ms:.1f} ms)")
+                if warm_response is not None:
+                    print(
+                        f"Warm-up attempted={warm_response.attempted} used_llm={warm_response.used_llm} "
+                        f"latency_ms={warm_response.latency_ms:.1f} error={warm_response.error or 'none'}"
+                    )
             elif status.ok:
                 print(f"Ollama reachable, but model '{status.model}' was not found.")
                 print("Available models: " + (", ".join(status.available_models) or "none"))
             else:
                 print(f"Ollama unavailable: {status.error}")
-        return 0 if status.ok and status.model_available else 1
+        if not (status.ok and status.model_available):
+            return 1
+        if warm_response is not None and not warm_response.used_llm:
+            return 1
+        return 0
 
     if not args.query:
         print("Missing query. Example: python -m backend.conversation.recall_agent \"Where is the cup?\"")
@@ -649,7 +684,9 @@ def main() -> int:
         llm_required=args.llm_required,
         ollama_url=args.ollama_url,
         ollama_model=args.ollama_model,
-        ollama_timeout_s=args.ollama_timeout,
+        llm_timeout_s=llm_timeout,
+        llm_connect_timeout_s=args.llm_connect_timeout,
+        ollama_keep_alive=args.ollama_keep_alive,
         log_paths=args.log_path,
     )
     result = agent.answer(args.query)

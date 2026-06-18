@@ -30,6 +30,7 @@ from backend.behavior.godot_udp_sender import GodotUdpSender
 from backend.behavior.state_machine import InteractionStateMachine, LampState
 from backend.conversation.chat_udp_receiver import ChatUdpReceiver
 from backend.conversation.recall_agent import RecallAgent
+from backend.conversation.web_chat_server import WebChatRequest, WebChatServer
 from backend.evaluation.latency_logger import LatencyLogger
 from backend.memory.scene_memory import SceneMemory
 from backend.perception.camera import OpenCVCamera
@@ -87,14 +88,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--memory-dedupe-window", type=float, default=8.0, help="Seconds to suppress repeated same-object/same-location memory writes.")
     parser.add_argument("--object-frame-dir", type=str, default="data/object_frames", help="Directory for saved object evidence frames.")
 
-    parser.add_argument("--interactive-recall", action="store_true", help="Allow text recall questions while the backend is running.")
-    parser.add_argument("--enable-godot-chat", action="store_true", help="Listen for live chat queries from Godot over local UDP.")
+    parser.add_argument("--interactive-recall", action="store_true", help="Debug only: allow terminal recall questions while the backend is running.")
+    parser.add_argument("--enable-godot-chat", action="store_true", help="Legacy/non-primary: listen for live chat queries from Godot over local UDP.")
     parser.add_argument("--chat-host", type=str, default="127.0.0.1", help="Backend UDP host for Godot chat messages.")
     parser.add_argument("--chat-port", type=int, default=4243, help="Backend UDP port for Godot chat messages.")
+    parser.add_argument("--enable-web-chat", action="store_true", help="Enable browser-based recall chat served by Python.")
+    parser.add_argument("--web-chat-host", type=str, default="127.0.0.1", help="Browser chat HTTP host.")
+    parser.add_argument("--web-chat-port", type=int, default=8765, help="Browser chat HTTP port.")
     parser.add_argument("--use-llm", action="store_true", help="Use Ollama/local LLM only to phrase retrieved memory answers.")
     parser.add_argument("--ollama-url", type=str, default="http://localhost:11434", help="Ollama base URL for --use-llm.")
-    parser.add_argument("--ollama-model", type=str, default="llama3.2", help="Ollama model for recall phrasing, e.g. llama3.2 or qwen2.5.")
-    parser.add_argument("--ollama-timeout", type=float, default=8.0, help="Ollama chat timeout in seconds for recall phrasing.")
+    parser.add_argument("--ollama-model", type=str, default="qwen2.5:1.5b", help="Ollama model for recall phrasing, e.g. qwen2.5:1.5b.")
+    parser.add_argument("--llm-timeout", type=float, default=90.0, help="Ollama full chat/read timeout in seconds for recall phrasing.")
+    parser.add_argument("--llm-connect-timeout", type=float, default=5.0, help="Ollama connection/status timeout in seconds.")
+    parser.add_argument("--ollama-keep-alive", type=str, default="1h", help="Ollama keep_alive duration, e.g. 1h.")
+    parser.add_argument("--ollama-timeout", type=float, default=None, help="Backward-compatible alias for --llm-timeout.")
     parser.add_argument("--llm-required", action="store_true", help="Fail fast at startup if Ollama/model is unavailable; live answers still fall back but log failures.")
 
     window_group = parser.add_mutually_exclusive_group()
@@ -117,15 +124,16 @@ def append_jsonl(paths: Path | list[Path] | tuple[Path, ...], payload: dict) -> 
 
 
 def start_recall_input_thread(
-    recall_queue: "queue.Queue[str]",
+    recall_queue: "queue.Queue[object]",
     stop_event: threading.Event,
     logger,
 ) -> threading.Thread:
     """Start a tiny stdin reader so camera/perception loop stays non-blocking."""
 
     def _worker() -> None:
-        print("Interactive recall enabled. Type a question such as: Where is the cup?", flush=True)
-        print("Type :q, quit, or exit to stop accepting recall questions.", flush=True)
+        print("Interactive recall is for debugging only. Final demo input should use http://127.0.0.1:8765.", flush=True)
+        print("Do not paste PowerShell commands into this prompt; command-looking lines will be ignored.", flush=True)
+        print("Type a question such as: Where is the cup? Type :q, quit, or exit to stop.", flush=True)
         while not stop_event.is_set():
             try:
                 line = input("recall> ")
@@ -143,11 +151,48 @@ def start_recall_input_thread(
                 logger.info("Interactive recall input stop requested")
                 stop_event.set()
                 break
+            if looks_like_shell_command(query):
+                logger.warning("Ignoring terminal recall input that looks like a shell command: %r", query)
+                print("Ignored shell-looking line. Use the browser chat for demo questions.", flush=True)
+                continue
             recall_queue.put(query)
 
     thread = threading.Thread(target=_worker, name="interactive-recall-input", daemon=True)
     thread.start()
     return thread
+
+
+def looks_like_shell_command(text: str) -> bool:
+    """Avoid treating pasted PowerShell/script lines as recall questions."""
+
+    stripped = text.strip()
+    lowered = stripped.lower()
+    shell_prefixes = (
+        "python ",
+        "python3 ",
+        "py ",
+        "pip ",
+        "ollama ",
+        "curl ",
+        "irm ",
+        "invoke-webrequest",
+        "invoke-restmethod",
+        "cd ",
+        "set-location",
+        "mkdir ",
+        "copy ",
+        "move ",
+        "del ",
+        "dir",
+        "ls",
+    )
+    if lowered.startswith(shell_prefixes):
+        return True
+    if lowered.startswith(("--", "$", ".\\", "./", "#")):
+        return True
+    if "`" in stripped and not stripped.endswith("?"):
+        return True
+    return False
 
 
 def build_configs(
@@ -254,10 +299,12 @@ def main() -> int:
     object_detector = YoloObjectDetector(object_config, logger=logger)
     scene_memory = SceneMemory(memory_config, logger=logger)
 
+    llm_timeout = float(args.ollama_timeout) if args.ollama_timeout is not None else float(args.llm_timeout)
+
     recall_agent = None
-    recall_queue: queue.Queue[str] | None = None
+    recall_queue: queue.Queue[object] | None = None
     recall_stop_event = threading.Event()
-    if args.interactive_recall or args.enable_godot_chat:
+    if args.interactive_recall or args.enable_godot_chat or args.enable_web_chat:
         recall_log_paths = [run_paths.run_dir / "recall.jsonl"]
         if not args.no_latest:
             recall_log_paths.append(run_paths.latest_dir / "recall.jsonl")
@@ -267,13 +314,28 @@ def main() -> int:
             llm_required=args.llm_required,
             ollama_url=args.ollama_url,
             ollama_model=args.ollama_model,
-            ollama_timeout_s=args.ollama_timeout,
+            llm_timeout_s=llm_timeout,
+            llm_connect_timeout_s=args.llm_connect_timeout,
+            ollama_keep_alive=args.ollama_keep_alive,
             log_paths=recall_log_paths,
             logger=logger,
         )
         recall_queue = queue.Queue()
         if args.interactive_recall:
             start_recall_input_thread(recall_queue, recall_stop_event, logger)
+
+    web_chat_server = None
+    if args.enable_web_chat:
+        if recall_queue is None:
+            recall_queue = queue.Queue()
+        web_chat_server = WebChatServer(
+            output_queue=recall_queue,
+            host=args.web_chat_host,
+            port=args.web_chat_port,
+            request_timeout_s=max(30.0, llm_timeout + 15.0),
+            logger=logger,
+        )
+        web_chat_server.start()
 
     chat_receiver = None
     if args.enable_godot_chat:
@@ -298,7 +360,7 @@ def main() -> int:
             )
             return 1
 
-    logger.info("Starting Milestone 4.3 backend with isolated run logging")
+    logger.info("Starting Milestone 4.3.1 backend with browser chat and homelab Ollama support")
     logger.info("Run id=%s", run_paths.run_id)
     logger.info("Run directory=%s", run_paths.run_dir)
     if not args.no_latest:
@@ -329,16 +391,21 @@ def main() -> int:
     )
     logger.info("Commands will be saved to %s", commands_path)
     logger.info(
-        "Recall config interactive=%s godot_chat=%s chat_udp=%s:%s use_llm=%s llm_required=%s ollama_url=%s ollama_model=%s ollama_timeout=%.1fs",
+        "Recall config interactive=%s godot_chat=%s web_chat=%s web_url=http://%s:%s chat_udp=%s:%s use_llm=%s llm_required=%s ollama_url=%s ollama_model=%s llm_timeout=%.1fs connect_timeout=%.1fs keep_alive=%s",
         args.interactive_recall,
         args.enable_godot_chat,
+        args.enable_web_chat,
+        args.web_chat_host,
+        args.web_chat_port,
         args.chat_host,
         args.chat_port,
         args.use_llm,
         args.llm_required,
         args.ollama_url,
         args.ollama_model,
-        args.ollama_timeout,
+        llm_timeout,
+        args.llm_connect_timeout,
+        args.ollama_keep_alive,
     )
     if godot_udp_config.enabled:
         logger.info("Commands will also be streamed to Godot via udp://%s:%s", godot_udp_config.host, godot_udp_config.port)
@@ -454,10 +521,12 @@ def main() -> int:
             if recall_agent is not None and recall_queue is not None:
                 while True:
                     try:
-                        recall_query = recall_queue.get_nowait()
+                        recall_item = recall_queue.get_nowait()
                     except queue.Empty:
                         break
 
+                    web_request = recall_item if isinstance(recall_item, WebChatRequest) else None
+                    recall_query = web_request.text if web_request is not None else str(recall_item)
                     recall_result = recall_agent.answer(recall_query)
                     memory_retrieval_ms = round(recall_result.memory_retrieval_ms, 3)
                     llm_response_ms = (
@@ -481,8 +550,18 @@ def main() -> int:
                     append_jsonl(command_paths, recall_command)
                     last_godot_udp_send_ms = godot_sender.send(recall_command)
                     last_emit_at = time.monotonic()
+                    if web_request is not None:
+                        response_payload = recall_result.to_dict()
+                        response_payload["ok"] = not recall_result.llm_required_failed
+                        if recall_result.llm_required_failed:
+                            response_payload["error"] = "llm_required_failed"
+                        response_payload["godot_command_sent"] = bool(godot_udp_config.enabled)
+                        response_payload["godot_udp_ms"] = last_godot_udp_send_ms
+                        web_request.set_result(response_payload)
+
                     logger.info(
-                        "Sent recall command to Godot state=recalling parsed_object=%s memory_id=%s llm_attempted=%s llm_used=%s",
+                        "Sent recall command to Godot state=recalling source=%s parsed_object=%s memory_id=%s llm_attempted=%s llm_used=%s",
+                        "browser" if web_request is not None else "terminal_or_udp",
                         recall_result.parsed_object,
                         recall_result.memory_record.id if recall_result.memory_record else None,
                         recall_result.llm_attempted,
@@ -542,7 +621,7 @@ def main() -> int:
                 )
                 if object_detector.enabled:
                     draw_object_overlay(frame, display_detections)
-                cv2.imshow("LeLamp Milestone 4.3 - Engagement/Object Memory/Live Recall", frame)
+                cv2.imshow("LeLamp Milestone 4.3.1 - Engagement/Object Memory/Browser Recall", frame)
                 key = cv2.waitKey(1) & 0xFF
                 if key in (27, ord("q")):
                     logger.info("Quit requested from preview window")
@@ -562,11 +641,13 @@ def main() -> int:
         recall_stop_event.set()
         if chat_receiver is not None:
             chat_receiver.stop()
+        if web_chat_server is not None:
+            web_chat_server.stop()
         godot_sender.close()
         camera.release()
         if runtime_config.show_window:
             cv2.destroyAllWindows()
-        logger.info("Stopped Milestone 4 backend")
+        logger.info("Stopped Milestone 4.3.1 backend")
 
     return 0
 

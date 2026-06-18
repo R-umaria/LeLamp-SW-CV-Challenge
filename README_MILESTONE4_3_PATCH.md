@@ -119,7 +119,7 @@ Expected: `ok=true` and `model_available=true`.
 ### 3. Run recall with `--llm-required`
 
 ```powershell
-python -m backend.conversation.recall_agent "Where did you last see my bottle?" `
+python -m backend.conversation.recall_agent "Where did you last see my phone?" `
   --memory-db data/scene_memory.sqlite `
   --use-llm `
   --llm-required `

@@ -35,6 +35,12 @@ class IntentParserTests(unittest.TestCase):
     def test_what_do_you_remember_seeing(self) -> None:
         self.assert_intent("What do you remember seeing?", ConversationIntentType.LIST_RECENT_OBJECTS, None)
 
+    def test_where_last_bottle(self) -> None:
+        self.assert_intent("Where did you last see my bottle?", ConversationIntentType.OBJECT_LAST_SEEN, "bottle")
+
+    def test_was_there_any_pen_in_view(self) -> None:
+        self.assert_intent("Was there any pen in the view?", ConversationIntentType.OBJECT_LAST_SEEN, "pen")
+
     def test_unsupported_chitchat(self) -> None:
         self.assert_intent("Tell me a joke", ConversationIntentType.UNSUPPORTED, None)
 
