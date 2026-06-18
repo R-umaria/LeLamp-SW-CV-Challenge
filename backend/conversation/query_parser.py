@@ -50,6 +50,9 @@ OBJECT_ALIASES: dict[str, str] = {
     "handbag": "bag",
     "vase": "vase",
     "scissors": "scissors",
+    "stapler": "stapler",
+    "pen": "pen",
+    "pencil": "pencil",
     "spectacles": "glasses",
     "glasses": "glasses",
 }
@@ -68,12 +71,19 @@ STOPWORDS = {
     "for",
     "have",
     "having",
+    "had",
+    "has",
+    "if",
     "i",
     "is",
     "it",
     "last",
     "locate",
     "location",
+    "detect",
+    "detected",
+    "objects",
+    "object",
     "me",
     "my",
     "near",
@@ -132,6 +142,18 @@ OBJECT_PHRASE_PATTERNS = [
 
 POSSESSIVE_TARGET_PATTERN = re.compile(rf"\bmy\s+{_TARGET_TEXT}")
 
+LIST_OBJECTS_PATTERNS = [
+    re.compile(r"\bwhat\s+(?:objects|things|items)\s+did\s+you\s+(?:detect|see|remember)\b"),
+    re.compile(r"\bwhat\s+do\s+you\s+remember\s+seeing\b"),
+    re.compile(r"\bwhat\s+have\s+you\s+(?:seen|detected)\b"),
+    re.compile(r"\bshow\s+me\s+(?:recent|the)?\s*(?:objects|things|items)\b"),
+]
+
+HAD_OBJECT_PATTERNS = [
+    re.compile(rf"\bdid\s+you\s+see\s+if\s+i\s+(?:had|have|was\s+holding|was\s+using)\s+(?:my\s+|the\s+|a\s+|an\s+)?{_TARGET_TEXT}"),
+    re.compile(rf"\bdid\s+you\s+notice\s+if\s+i\s+(?:had|have|was\s+holding|was\s+using)\s+(?:my\s+|the\s+|a\s+|an\s+)?{_TARGET_TEXT}"),
+]
+
 
 @dataclass(frozen=True)
 class ParsedObjectQuery:
@@ -159,6 +181,11 @@ def clean_query_text(text: str) -> str:
     return lowered
 
 
+def is_list_recent_objects_query(text: str) -> bool:
+    cleaned = clean_query_text(text)
+    return any(pattern.search(cleaned) is not None for pattern in LIST_OBJECTS_PATTERNS)
+
+
 def normalize_object_label(label: str) -> str:
     cleaned = clean_query_text(label)
     cleaned = re.sub(r"\b(my|the|a|an|please)\b", " ", cleaned)
@@ -177,6 +204,26 @@ def parse_object_query(query: str, aliases: dict[str, str] | None = None) -> Par
     cleaned = clean_query_text(query)
     if not cleaned:
         return ParsedObjectQuery(query, None, None, 0.0, "empty_query")
+
+    if is_list_recent_objects_query(cleaned):
+        return ParsedObjectQuery(query, None, None, 0.0, "list_recent_objects_query")
+
+    # Strong phrasing that previously failed as target="if":
+    # "Did you see if I had a stapler?" means the object is stapler.
+    for pattern in HAD_OBJECT_PATTERNS:
+        match = pattern.search(cleaned)
+        if not match:
+            continue
+        target = _sanitize_object_phrase(match.group("object"))
+        if target:
+            normalized = _normalize_with_aliases(target, alias_map)
+            return ParsedObjectQuery(
+                original_query=query,
+                target_text=target,
+                normalized_label=normalized or None,
+                confidence=0.86,
+                strategy="had_object_pattern",
+            )
 
     # Strongest signal: explicit possessive target. This fixes questions like
     # "did you see my spectacles that I left near the cup?" by selecting

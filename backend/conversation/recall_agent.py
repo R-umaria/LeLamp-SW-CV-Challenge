@@ -1,14 +1,13 @@
-"""Grounded memory-recall agent for Milestone 4.1.
+"""Grounded live conversation agent for LeLamp Milestone 4.3.
 
-CLI examples:
-    python -m backend.conversation.recall_agent "Where did you last see my phone?"
-    python -m backend.conversation.recall_agent "Where is the cup?" --json
-    python -m backend.conversation.recall_agent "Have you seen my mouse?" --use-llm
-    python -m backend.conversation.recall_agent --test-ollama --ollama-model llama3.2
+The recall path is deliberately bounded:
 
-The recall path remains bounded:
-    text query -> deterministic object parser -> exact SQLite lookup ->
-    deterministic or strictly grounded LLM phrasing.
+    user text -> deterministic intent parser -> SQLite retrieval -> optional
+    structured Ollama /api/chat phrasing -> strict fact validation.
+
+The LLM never searches memory, never chooses locations, and never overrides
+SQLite. If the model returns invalid JSON or contradicts retrieved memory, the
+candidate is rejected and the deterministic grounded answer is used.
 """
 
 from __future__ import annotations
@@ -21,56 +20,58 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable, Mapping, Sequence
 
+from backend.conversation.intent_parser import ConversationIntentType, ParsedConversationIntent, parse_conversation_intent
 from backend.conversation.llm_client import LLMResponse, OllamaClient, OllamaStatus
-from backend.conversation.query_parser import ParsedObjectQuery, parse_object_query
+from backend.conversation.query_parser import ParsedObjectQuery
 from backend.memory.memory_store import MemoryRecord, MemoryStore
 
 
-STRICT_GROUNDED_RECALL_PROMPT = """You are the voice of a LeLamp-inspired robotic lamp.
+RECALL_RESPONSE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "answer_type": {
+            "type": "string",
+            "enum": ["memory_answer", "no_memory", "recent_objects", "unsupported"],
+        },
+        "target_object": {"type": ["string", "null"]},
+        "location_label": {"type": ["string", "null"]},
+        "confidence": {"type": ["number", "null"]},
+        "timestamp": {"type": ["string", "null"]},
+        "spoken_answer": {"type": "string"},
+    },
+    "required": ["answer_type", "target_object", "location_label", "confidence", "timestamp", "spoken_answer"],
+    "additionalProperties": False,
+}
 
-You are only a phrasing layer. A valid SQLite memory record has already been retrieved.
-Use only that memory record and the grounded template sentence below.
-
-Hard rules:
-- Do not use outside knowledge.
-- Do not infer, guess, or invent a location.
-- Do not say where the object is now. Only say where it was last seen.
-- Do not mention nearby objects or spatial relationships unless they are explicitly in the memory record.
-- Do not mention frame paths, files, IDs, JSON, logs, or implementation details.
-- Because a valid memory record is provided, do not say that you do not remember seeing the object.
-- Keep the answer to one short conversational sentence.
-
-Preferred answer:
-{grounded_template_answer}
-
-User question:
-{user_query}
-
-Parsed target object:
-{parsed_object}
-
-Memory record JSON:
-{memory_record_json}
-
-Answer with one sentence only:"""
+SYSTEM_MESSAGE = """You are the voice of a LeLamp-inspired robotic lamp.
+You are only a wording layer. The backend has already retrieved the only facts you may use.
+Return exactly one JSON object matching the provided schema.
+Do not invent object locations. Do not mention frame paths, SQLite, JSON, IDs, logs, files, or implementation details.
+Keep spoken_answer to one concise conversational sentence."""
 
 
 @dataclass(frozen=True)
 class RecallResult:
     user_query: str
+    intent: ParsedConversationIntent
     parsed_object: str | None
     parsed: ParsedObjectQuery
     memory_record: MemoryRecord | None
+    recent_records: tuple[MemoryRecord, ...]
     answer: str
+    answer_type: str
     memory_retrieval_ms: float
     llm_response_ms: float | None
     llm_requested: bool
+    llm_required: bool
     llm_attempted: bool
     llm_used: bool
     llm_error: str | None
     llm_fallback_reason: str | None
+    llm_validation_reason: str | None
+    llm_raw_response: str | None
     ollama_connection_ok: bool | None
     timestamp: str
 
@@ -79,43 +80,61 @@ class RecallResult:
         """Backward-compatible alias for Milestone 4 callers."""
         return self.llm_used
 
+    @property
+    def llm_required_failed(self) -> bool:
+        return self.llm_required and self.llm_requested and not self.llm_used and self.answer_type in {
+            "memory_answer",
+            "recent_objects",
+        }
+
     def to_dict(self) -> dict:
         return {
             "timestamp": self.timestamp,
             "user_query": self.user_query,
+            "intent": self.intent.to_dict(),
+            "answer_type": self.answer_type,
             "parsed_object": self.parsed_object,
             "parsed": self.parsed.to_dict(),
             "retrieved_memory_id": self.memory_record.id if self.memory_record else None,
             "memory_record": self.memory_record.to_dict() if self.memory_record else None,
+            "recent_records": [record.to_dict() for record in self.recent_records],
             "memory_retrieval_ms": round(float(self.memory_retrieval_ms), 3),
             "llm_response_ms": None if self.llm_response_ms is None else round(float(self.llm_response_ms), 3),
             "llm_requested": self.llm_requested,
+            "llm_required": self.llm_required,
             "llm_attempted": self.llm_attempted,
             "llm_used": self.llm_used,
             "used_llm": self.llm_used,
+            "llm_required_failed": self.llm_required_failed,
             "llm_error": self.llm_error,
             "llm_fallback_reason": self.llm_fallback_reason,
+            "llm_validation_reason": self.llm_validation_reason,
+            "llm_raw_response": self.llm_raw_response,
             "ollama_connection_ok": self.ollama_connection_ok,
             "answer": self.answer,
         }
 
 
 class RecallAgent:
-    """Retrieves one grounded memory and phrases a response."""
+    """Answers supported memory questions using SQLite-grounded facts."""
 
     def __init__(
         self,
         memory_db: str | Path = "data/scene_memory.sqlite",
         use_llm: bool = False,
+        llm_required: bool = False,
         ollama_url: str = "http://localhost:11434",
         ollama_model: str = "llama3.2",
         ollama_timeout_s: float = 8.0,
+        recent_object_limit: int = 8,
         log_paths: str | Path | Iterable[str | Path] | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
         self.memory_db = Path(memory_db)
         self.store = MemoryStore(self.memory_db)
         self.use_llm = bool(use_llm)
+        self.llm_required = bool(llm_required)
+        self.recent_object_limit = int(recent_object_limit)
         self.logger = logger or logging.getLogger("lelamp")
         self.log_paths = _coerce_paths(log_paths)
         self.ollama: OllamaClient | None = None
@@ -147,100 +166,134 @@ class RecallAgent:
                 )
 
     def answer(self, user_query: str) -> RecallResult:
-        parsed = parse_object_query(user_query)
+        intent = parse_conversation_intent(user_query)
+        parsed = intent.object_query
+
         retrieval_start = time.perf_counter()
-        memory_record = None
-        if parsed.normalized_label:
+        memory_record: MemoryRecord | None = None
+        recent_records: tuple[MemoryRecord, ...] = ()
+
+        if intent.intent == ConversationIntentType.OBJECT_LAST_SEEN and parsed.normalized_label:
             memory_record = self.store.find_latest_by_normalized_label(parsed.normalized_label)
+        elif intent.intent == ConversationIntentType.LIST_RECENT_OBJECTS:
+            recent_records = tuple(self.store.recent_unique_by_normalized_label(limit=self.recent_object_limit))
+
         memory_retrieval_ms = (time.perf_counter() - retrieval_start) * 1000.0
 
-        fallback_answer = deterministic_recall_answer(parsed, memory_record)
+        fallback_answer, answer_type = deterministic_conversation_answer(intent, memory_record, recent_records)
         final_answer = fallback_answer
+        final_answer_type = answer_type
 
         llm_response: LLMResponse | None = None
         llm_attempted = False
         llm_used = False
         llm_error: str | None = None
         llm_fallback_reason: str | None = None
+        llm_validation_reason: str | None = None
+        llm_raw_response: str | None = None
         ollama_connection_ok: bool | None = None
 
         if self.use_llm:
             ollama_connection_ok = False if self.ollama_status is None else (
                 self.ollama_status.ok and self.ollama_status.model_available
             )
+            llm_response = self._try_llm_answer(user_query, intent, memory_record, recent_records)
+            llm_attempted = llm_response.attempted
+            llm_error = llm_response.error
+            llm_fallback_reason = llm_response.fallback_reason
+            llm_raw_response = llm_response.text if llm_response.text else None
 
-            # Safer MVP rule: only ask the LLM to phrase an answer when a
-            # concrete memory exists. Missing-memory answers stay deterministic.
-            if memory_record is None:
-                llm_fallback_reason = "no_memory_record"
-            elif self.ollama is None:
-                llm_error = "ollama_client_not_initialized"
-                llm_fallback_reason = "client_unavailable"
-            elif self.ollama_status is not None and not self.ollama_status.ok:
-                llm_error = self.ollama_status.error or "ollama_unavailable"
-                llm_fallback_reason = "connectivity_check_failed"
-            elif self.ollama_status is not None and not self.ollama_status.model_available:
-                llm_error = self.ollama_status.error or f"model_not_found: {self.ollama.model}"
-                llm_fallback_reason = "model_unavailable"
-            else:
-                prompt = build_grounded_prompt(user_query, parsed, memory_record)
-                llm_response = self.ollama.generate(prompt)
-                llm_attempted = llm_response.attempted
-                llm_used = llm_response.used_llm
-                llm_error = llm_response.error
-                llm_fallback_reason = llm_response.fallback_reason
-                if llm_response.used_llm and llm_response.text:
-                    candidate_answer = _clean_llm_text(llm_response.text)
-                    is_grounded, validation_reason = _validate_llm_grounding(
-                        candidate_answer, parsed, memory_record
-                    )
-                    if is_grounded:
-                        final_answer = candidate_answer
-                        llm_used = True
-                    else:
-                        final_answer = fallback_answer
-                        llm_used = False
-                        llm_fallback_reason = validation_reason
-                        llm_error = f"invalid_llm_response: {validation_reason}"
+            if llm_response.used_llm and llm_response.json_data is not None:
+                is_valid, validation_reason = validate_structured_llm_response(
+                    llm_response.json_data,
+                    intent,
+                    memory_record,
+                    recent_records,
+                )
+                if is_valid:
+                    final_answer = str(llm_response.json_data["spoken_answer"]).strip()
+                    final_answer_type = str(llm_response.json_data["answer_type"])
+                    llm_used = True
+                    llm_error = None
+                    llm_fallback_reason = None
+                    llm_validation_reason = None
                 else:
-                    final_answer = fallback_answer
+                    llm_validation_reason = validation_reason
+                    llm_fallback_reason = validation_reason
+                    llm_error = f"invalid_llm_response: {validation_reason}"
+            elif llm_response.attempted and llm_response.fallback_reason:
+                llm_validation_reason = llm_response.fallback_reason
 
             if self.use_llm and not llm_used:
                 self.logger.warning(
-                    "LLM fallback used query=%r parsed_object=%s reason=%s error=%s attempted=%s",
+                    "LLM candidate rejected query=%r intent=%s parsed_object=%s reason=%s error=%s attempted=%s raw=%r",
                     user_query,
+                    intent.intent.value,
                     parsed.normalized_label,
                     llm_fallback_reason,
                     llm_error,
                     llm_attempted,
+                    llm_raw_response,
                 )
 
         result = RecallResult(
             user_query=user_query,
+            intent=intent,
             parsed_object=parsed.normalized_label,
             parsed=parsed,
             memory_record=memory_record,
+            recent_records=recent_records,
             answer=final_answer,
+            answer_type=final_answer_type,
             memory_retrieval_ms=memory_retrieval_ms,
             llm_response_ms=None if llm_response is None else llm_response.latency_ms,
             llm_requested=self.use_llm,
+            llm_required=self.llm_required,
             llm_attempted=llm_attempted,
             llm_used=llm_used,
             llm_error=llm_error,
             llm_fallback_reason=llm_fallback_reason,
+            llm_validation_reason=llm_validation_reason,
+            llm_raw_response=llm_raw_response,
             ollama_connection_ok=ollama_connection_ok,
             timestamp=datetime.now().isoformat(timespec="milliseconds"),
         )
         self._log_result(result)
         return result
 
+    def _try_llm_answer(
+        self,
+        user_query: str,
+        intent: ParsedConversationIntent,
+        memory_record: MemoryRecord | None,
+        recent_records: Sequence[MemoryRecord],
+    ) -> LLMResponse:
+        if intent.intent == ConversationIntentType.UNSUPPORTED:
+            return LLMResponse("", attempted=False, used_llm=False, latency_ms=0.0, fallback_reason="unsupported_intent")
+        if intent.intent == ConversationIntentType.OBJECT_LAST_SEEN and memory_record is None:
+            return LLMResponse("", attempted=False, used_llm=False, latency_ms=0.0, fallback_reason="no_memory_record")
+        if intent.intent == ConversationIntentType.LIST_RECENT_OBJECTS and not recent_records:
+            return LLMResponse("", attempted=False, used_llm=False, latency_ms=0.0, fallback_reason="no_recent_objects")
+        if self.ollama is None:
+            return LLMResponse("", attempted=False, used_llm=False, latency_ms=0.0, error="ollama_client_not_initialized", fallback_reason="client_unavailable")
+        if self.ollama_status is not None and not self.ollama_status.ok:
+            return LLMResponse("", attempted=False, used_llm=False, latency_ms=0.0, error=self.ollama_status.error or "ollama_unavailable", fallback_reason="connectivity_check_failed")
+        if self.ollama_status is not None and not self.ollama_status.model_available:
+            return LLMResponse("", attempted=False, used_llm=False, latency_ms=0.0, error=self.ollama_status.error or f"model_not_found: {self.ollama.model}", fallback_reason="model_unavailable")
+
+        messages = build_structured_messages(user_query, intent, memory_record, recent_records)
+        return self.ollama.chat_json(messages, RECALL_RESPONSE_SCHEMA, max_tokens=180)
+
     def _log_result(self, result: RecallResult) -> None:
         payload = result.to_dict()
         self.logger.info(
-            "Recall query=%r parsed_object=%s memory_id=%s retrieval_ms=%.3f llm_attempted=%s llm_used=%s llm_ms=%s llm_error=%s fallback=%s answer=%r",
+            "Recall query=%r intent=%s parsed_object=%s answer_type=%s memory_id=%s recent_count=%s retrieval_ms=%.3f llm_attempted=%s llm_used=%s llm_ms=%s llm_error=%s fallback=%s answer=%r",
             result.user_query,
+            result.intent.intent.value,
             result.parsed_object,
+            result.answer_type,
             result.memory_record.id if result.memory_record else None,
+            len(result.recent_records),
             result.memory_retrieval_ms,
             result.llm_attempted,
             result.llm_used,
@@ -255,24 +308,143 @@ class RecallAgent:
                 f.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
-def build_grounded_prompt(user_query: str, parsed: ParsedObjectQuery, memory_record: MemoryRecord) -> str:
-    return STRICT_GROUNDED_RECALL_PROMPT.format(
-        user_query=user_query,
-        parsed_object=parsed.normalized_label or "",
-        grounded_template_answer=deterministic_recall_answer(parsed, memory_record),
-        memory_record_json=json.dumps(_memory_record_for_prompt(memory_record), ensure_ascii=False, indent=2),
+def build_structured_messages(
+    user_query: str,
+    intent: ParsedConversationIntent,
+    memory_record: MemoryRecord | None,
+    recent_records: Sequence[MemoryRecord],
+) -> list[dict[str, str]]:
+    facts: dict[str, Any] = {
+        "user_query": user_query,
+        "intent": intent.intent.value,
+        "parsed_object": intent.normalized_label,
+        "schema": RECALL_RESPONSE_SCHEMA,
+    }
+
+    if intent.intent == ConversationIntentType.OBJECT_LAST_SEEN and memory_record is not None:
+        facts["retrieved_memory"] = _memory_record_for_llm(memory_record)
+        facts["required_json_values"] = {
+            "answer_type": "memory_answer",
+            "target_object": memory_record.normalized_label,
+            "location_label": memory_record.location_label,
+            "confidence": round(float(memory_record.confidence), 3),
+            "timestamp": memory_record.timestamp,
+        }
+        facts["fallback_answer"] = deterministic_object_answer(intent.object_query, memory_record)
+    elif intent.intent == ConversationIntentType.LIST_RECENT_OBJECTS:
+        labels = [record.normalized_label for record in recent_records]
+        facts["recent_objects"] = [_memory_record_for_llm(record) for record in recent_records]
+        facts["allowed_labels"] = labels
+        facts["required_json_values"] = {
+            "answer_type": "recent_objects",
+            "target_object": None,
+            "location_label": None,
+            "confidence": None,
+            "timestamp": None,
+        }
+        facts["fallback_answer"] = deterministic_recent_objects_answer(recent_records)
+
+    user_content = (
+        "Use only these backend-provided memory facts. Return exactly one JSON object.\n"
+        + json.dumps(facts, ensure_ascii=False, indent=2)
+    )
+    return [
+        {"role": "system", "content": SYSTEM_MESSAGE},
+        {"role": "user", "content": user_content},
+    ]
+
+
+def validate_structured_llm_response(
+    candidate: Mapping[str, Any],
+    intent: ParsedConversationIntent,
+    memory_record: MemoryRecord | None,
+    recent_records: Sequence[MemoryRecord],
+) -> tuple[bool, str | None]:
+    """Validate structured LLM output against retrieved SQLite facts."""
+
+    required_keys = {"answer_type", "target_object", "location_label", "confidence", "timestamp", "spoken_answer"}
+    missing = sorted(required_keys.difference(candidate.keys()))
+    if missing:
+        return False, "missing_schema_keys:" + ",".join(missing)
+
+    answer_type = str(candidate.get("answer_type") or "").strip()
+    spoken_answer = str(candidate.get("spoken_answer") or "").strip()
+    if not spoken_answer:
+        return False, "empty_spoken_answer"
+    leak_reason = _validate_spoken_answer_text(spoken_answer, memory_record is not None)
+    if leak_reason is not None:
+        return False, leak_reason
+
+    if intent.intent == ConversationIntentType.OBJECT_LAST_SEEN:
+        if memory_record is None:
+            return False, "no_memory_record"
+        if answer_type != "memory_answer":
+            return False, "wrong_answer_type"
+        expected_object = str(memory_record.normalized_label or intent.normalized_label or "").strip().lower()
+        target_object = str(candidate.get("target_object") or "").strip().lower()
+        if target_object != expected_object:
+            return False, "target_object_mismatch"
+        location_label = candidate.get("location_label")
+        if not isinstance(location_label, str) or location_label != memory_record.location_label:
+            return False, "location_label_mismatch"
+        if memory_record.location_label.lower() not in spoken_answer.lower():
+            return False, "spoken_answer_missing_location"
+        if expected_object and expected_object not in spoken_answer.lower():
+            return False, "spoken_answer_missing_target_object"
+        if not _candidate_confidence_matches(candidate.get("confidence"), memory_record.confidence) and str(candidate.get("timestamp") or "") != memory_record.timestamp:
+            return False, "missing_matching_confidence_or_timestamp"
+        return True, None
+
+    if intent.intent == ConversationIntentType.LIST_RECENT_OBJECTS:
+        if not recent_records:
+            return False, "no_recent_objects"
+        if answer_type != "recent_objects":
+            return False, "wrong_answer_type"
+        if candidate.get("target_object") is not None:
+            return False, "target_object_should_be_null"
+        if candidate.get("location_label") is not None:
+            return False, "location_label_should_be_null"
+        allowed_labels = [record.normalized_label.strip().lower() for record in recent_records if record.normalized_label.strip()]
+        lower_answer = spoken_answer.lower()
+        missing_labels = [label for label in allowed_labels if label not in lower_answer]
+        if missing_labels:
+            return False, "missing_recent_labels:" + ",".join(missing_labels)
+        return True, None
+
+    if answer_type != "unsupported":
+        return False, "unsupported_intent_wrong_answer_type"
+    return True, None
+
+
+def deterministic_conversation_answer(
+    intent: ParsedConversationIntent,
+    memory_record: MemoryRecord | None,
+    recent_records: Sequence[MemoryRecord],
+) -> tuple[str, str]:
+    if intent.intent == ConversationIntentType.OBJECT_LAST_SEEN:
+        if memory_record is None:
+            return deterministic_no_memory_answer(intent.object_query), "no_memory"
+        return deterministic_object_answer(intent.object_query, memory_record), "memory_answer"
+    if intent.intent == ConversationIntentType.LIST_RECENT_OBJECTS:
+        if not recent_records:
+            return "I do not remember seeing any objects yet.", "no_memory"
+        return deterministic_recent_objects_answer(recent_records), "recent_objects"
+    return (
+        "I can answer grounded memory questions, like where I last saw your phone, or what objects I detected.",
+        "unsupported",
     )
 
 
 def deterministic_recall_answer(parsed: ParsedObjectQuery, memory_record: MemoryRecord | None) -> str:
-    display_label = _display_object_label(parsed, memory_record)
-
-    if not parsed.normalized_label:
-        return "I am not sure which object you mean. Ask me about a specific object, like your cup or phone."
+    """Backward-compatible object-only deterministic answer."""
 
     if memory_record is None:
-        return f"I do not remember seeing your {display_label}."
+        return deterministic_no_memory_answer(parsed)
+    return deterministic_object_answer(parsed, memory_record)
 
+
+def deterministic_object_answer(parsed: ParsedObjectQuery, memory_record: MemoryRecord) -> str:
+    display_label = _display_object_label(parsed, memory_record)
     time_text = _friendly_time(memory_record.timestamp)
     return (
         f"I last saw your {display_label} on the {memory_record.location_label} "
@@ -280,7 +452,36 @@ def deterministic_recall_answer(parsed: ParsedObjectQuery, memory_record: Memory
     )
 
 
-def _memory_record_for_prompt(memory_record: MemoryRecord) -> dict:
+def deterministic_no_memory_answer(parsed: ParsedObjectQuery) -> str:
+    display_label = _display_object_label(parsed, None)
+    if display_label == "that object":
+        return "I can answer object-memory questions, like where I last saw your cup or phone."
+    return f"I do not remember seeing your {display_label}."
+
+
+def deterministic_recent_objects_answer(records: Sequence[MemoryRecord]) -> str:
+    labels = []
+    seen: set[str] = set()
+    for record in records:
+        label = record.normalized_label.strip().lower()
+        if label and label not in seen:
+            seen.add(label)
+            labels.append(label)
+    if not labels:
+        return "I do not remember seeing any objects yet."
+    return f"I recently saw {_join_labels(labels)}."
+
+
+def _join_labels(labels: Sequence[str]) -> str:
+    if len(labels) == 1:
+        return f"a {labels[0]}"
+    if len(labels) == 2:
+        return f"a {labels[0]} and {labels[1]}"
+    prefixed = [f"a {labels[0]}"] + list(labels[1:])
+    return ", ".join(prefixed[:-1]) + f", and {prefixed[-1]}"
+
+
+def _memory_record_for_llm(memory_record: MemoryRecord) -> dict:
     return {
         "object_label": memory_record.object_label,
         "normalized_label": memory_record.normalized_label,
@@ -309,36 +510,32 @@ def _friendly_time(timestamp_text: str) -> str:
     return parsed.strftime("%H:%M:%S on %Y-%m-%d")
 
 
-def _clean_llm_text(text: str) -> str:
-    cleaned = " ".join(text.strip().split())
-    for prefix in ("Answer:", "Lamp:", "LeLamp:"):
-        if cleaned.startswith(prefix):
-            cleaned = cleaned[len(prefix) :].strip()
-    return cleaned
+def _candidate_confidence_matches(candidate_value: Any, expected_confidence: float) -> bool:
+    try:
+        candidate = float(candidate_value)
+    except (TypeError, ValueError):
+        return False
+    return abs(candidate - float(expected_confidence)) <= 0.001
 
 
-def _validate_llm_grounding(
-    answer: str,
-    parsed: ParsedObjectQuery,
-    memory_record: MemoryRecord | None,
-) -> tuple[bool, str | None]:
-    """Accept an LLM answer only if it is consistent with retrieved memory.
-
-    This is the critical safety valve for local LLM use. Connectivity and a
-    non-empty generated response are not enough. If SQLite retrieval found a
-    record, the displayed/spoken response must not contradict that record or
-    omit the actual stored location. Invalid responses fall back to the
-    deterministic grounded template.
-    """
-
-    if memory_record is None:
-        return False, "no_memory_record"
-
-    cleaned = " ".join(str(answer or "").strip().split())
-    if not cleaned:
-        return False, "empty_llm_answer"
-
-    lowered = cleaned.lower()
+def _validate_spoken_answer_text(spoken_answer: str, memory_exists: bool) -> str | None:
+    lowered = " ".join(spoken_answer.strip().split()).lower()
+    implementation_leaks = (
+        "frame_path",
+        "frame path",
+        ".jpg",
+        ".png",
+        "data\\",
+        "data/",
+        "json",
+        "sqlite",
+        "memory id",
+        "database",
+        "log",
+        "file",
+    )
+    if any(marker in lowered for marker in implementation_leaks):
+        return "implementation_detail_leak"
 
     contradictory_phrases = (
         "do not remember",
@@ -354,27 +551,33 @@ def _validate_llm_grounding(
         "haven't seen",
         "never seen",
     )
-    if any(phrase in lowered for phrase in contradictory_phrases):
-        return False, "contradicts_retrieved_memory"
+    if memory_exists and any(phrase in lowered for phrase in contradictory_phrases):
+        return "contradicts_retrieved_memory"
+    return None
 
-    implementation_leaks = (
-        "frame_path",
-        "frame path",
-        ".jpg",
-        ".png",
-        "data\\",
-        "data/",
-        "json",
-        "sqlite",
-        "memory id",
-    )
-    if any(marker in lowered for marker in implementation_leaks):
-        return False, "implementation_detail_leak"
 
+def _validate_llm_grounding(
+    answer: str,
+    parsed: ParsedObjectQuery,
+    memory_record: MemoryRecord | None,
+) -> tuple[bool, str | None]:
+    """Backward-compatible validator for old one-sentence tests.
+
+    Milestone 4.3 uses ``validate_structured_llm_response``. This helper remains
+    for existing guardrail tests and rejects the same unsafe cases.
+    """
+
+    if memory_record is None:
+        return False, "no_memory_record"
+    leak_reason = _validate_spoken_answer_text(answer, memory_exists=True)
+    if leak_reason is not None:
+        return False, leak_reason
+    lowered = " ".join(str(answer or "").strip().split()).lower()
+    if not lowered:
+        return False, "empty_llm_answer"
     expected_location = str(memory_record.location_label or "").strip().lower()
     if expected_location and expected_location not in lowered:
         return False, "missing_stored_location"
-
     object_terms = {
         str(memory_record.normalized_label or "").strip().lower(),
         str(memory_record.object_label or "").strip().lower(),
@@ -384,17 +587,11 @@ def _validate_llm_grounding(
     object_terms = {term for term in object_terms if term}
     if object_terms and not any(term in lowered for term in object_terms):
         return False, "missing_target_object"
-
-    expected_confidence_options = {
-        f"{float(memory_record.confidence):.2f}",
-        f"{float(memory_record.confidence):.3f}",
-    }
+    expected_confidence_options = {f"{float(memory_record.confidence):.2f}", f"{float(memory_record.confidence):.3f}"}
     has_confidence = any(conf in lowered for conf in expected_confidence_options)
     has_timestamp = str(memory_record.timestamp or "").strip().lower() in lowered
-
     if not has_confidence and not has_timestamp:
         return False, "missing_confidence_or_timestamp"
-
     return True, None
 
 
@@ -410,10 +607,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Ask LeLamp grounded questions about stored object memory")
     parser.add_argument("query", nargs="?", help="Question, e.g. 'Where did you last see my phone?'")
     parser.add_argument("--memory-db", type=str, default="data/scene_memory.sqlite", help="SQLite scene-memory database path")
-    parser.add_argument("--use-llm", action="store_true", help="Use Ollama/local LLM only to phrase a retrieved memory answer")
+    parser.add_argument("--use-llm", action="store_true", help="Use Ollama/local LLM only to phrase retrieved memory answers")
+    parser.add_argument("--llm-required", action="store_true", help="Return nonzero if an LLM-eligible answer falls back")
     parser.add_argument("--ollama-url", type=str, default="http://localhost:11434", help="Ollama base URL")
     parser.add_argument("--ollama-model", type=str, default="llama3.2", help="Ollama model, e.g. llama3.2 or qwen2.5")
-    parser.add_argument("--ollama-timeout", type=float, default=8.0, help="Ollama generate timeout in seconds")
+    parser.add_argument("--ollama-timeout", type=float, default=8.0, help="Ollama chat timeout in seconds")
     parser.add_argument("--test-ollama", action="store_true", help="Check Ollama connectivity/model availability and exit")
     parser.add_argument("--json", action="store_true", help="Print machine-readable recall result JSON")
     parser.add_argument("--debug", action="store_true", help="Print debug metadata such as frame_path outside the spoken answer")
@@ -448,6 +646,7 @@ def main() -> int:
     agent = RecallAgent(
         memory_db=args.memory_db,
         use_llm=args.use_llm,
+        llm_required=args.llm_required,
         ollama_url=args.ollama_url,
         ollama_model=args.ollama_model,
         ollama_timeout_s=args.ollama_timeout,
@@ -467,8 +666,11 @@ def main() -> int:
     else:
         print(result.answer)
         print(
+            f"intent={result.intent.intent.value} "
+            f"answer_type={result.answer_type} "
             f"parsed_object={result.parsed_object or 'none'} "
             f"memory_id={result.memory_record.id if result.memory_record else 'none'} "
+            f"recent_count={len(result.recent_records)} "
             f"memory_retrieval_ms={result.memory_retrieval_ms:.3f} "
             f"llm_attempted={result.llm_attempted} "
             f"llm_used={result.llm_used} "
@@ -478,6 +680,9 @@ def main() -> int:
         )
         if args.debug and result.memory_record is not None:
             print(f"frame_path={result.memory_record.frame_path or 'none'}")
+
+    if result.llm_required_failed:
+        return 1
     return 0
 
 

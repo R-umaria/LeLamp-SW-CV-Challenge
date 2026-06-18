@@ -1,9 +1,9 @@
-"""Optional local LLM client for grounded recall phrasing.
+"""Local Ollama client for structured, grounded conversation responses.
 
-This module uses only the Python standard library so the recall CLI works
-without extra client packages. It targets Ollama and fails closed: if Ollama is
-unavailable, the caller receives a structured diagnostic and can use a
- deterministic grounded template response.
+Milestone 4.3 intentionally uses Ollama's ``/api/chat`` endpoint instead of
+raw ``/api/generate`` phrasing. The model is constrained with a JSON schema and
+all callers still validate the returned facts against SQLite memory before the
+answer is trusted.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 
 @dataclass(frozen=True)
@@ -43,12 +43,21 @@ class OllamaStatus:
 
 @dataclass(frozen=True)
 class LLMResponse:
+    """Result from a local LLM request.
+
+    ``text`` is the raw assistant content. ``json_data`` is populated only when
+    the raw content parsed as a JSON object. ``used_llm`` means Ollama returned a
+    non-empty response; it does *not* mean the answer is trusted. Trust is decided
+    later by the recall validator.
+    """
+
     text: str
     attempted: bool
     used_llm: bool
     latency_ms: float
     error: str | None = None
     fallback_reason: str | None = None
+    json_data: dict[str, Any] | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -58,11 +67,12 @@ class LLMResponse:
             "latency_ms": round(float(self.latency_ms), 3),
             "error": self.error,
             "fallback_reason": self.fallback_reason,
+            "json_data": self.json_data,
         }
 
 
 class OllamaClient:
-    """Small Ollama wrapper with timeout and deterministic generation settings."""
+    """Small Ollama wrapper using only the Python standard library."""
 
     def __init__(
         self,
@@ -105,21 +115,30 @@ class OllamaClient:
             elapsed_ms = (time.perf_counter() - start) * 1000.0
             return OllamaStatus(False, self.base_url, self.model, False, elapsed_ms, f"ollama_status_error: {exc}")
 
-    def generate(self, prompt: str) -> LLMResponse:
+    def chat_json(
+        self,
+        messages: Sequence[Mapping[str, str]],
+        schema: Mapping[str, Any],
+        *,
+        max_tokens: int = 180,
+    ) -> LLMResponse:
+        """Call Ollama ``/api/chat`` and request a JSON object matching ``schema``."""
+
         start = time.perf_counter()
         payload = {
             "model": self.model,
-            "prompt": prompt,
+            "messages": [dict(message) for message in messages],
             "stream": False,
+            "format": dict(schema),
             "options": {
                 "temperature": 0.0,
                 "top_p": 0.8,
-                "num_predict": 80,
+                "num_predict": int(max_tokens),
             },
         }
         body = json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(
-            url=f"{self.base_url}/api/generate",
+            url=f"{self.base_url}/api/chat",
             data=body,
             headers={"Content-Type": "application/json"},
             method="POST",
@@ -129,7 +148,10 @@ class OllamaClient:
             with urllib.request.urlopen(request, timeout=self.timeout_s) as response:
                 raw = response.read().decode("utf-8")
             parsed = json.loads(raw)
-            text = str(parsed.get("response", "")).strip()
+            message = parsed.get("message", {})
+            text = ""
+            if isinstance(message, dict):
+                text = str(message.get("content", "")).strip()
             elapsed_ms = (time.perf_counter() - start) * 1000.0
             if not text:
                 return LLMResponse(
@@ -137,10 +159,29 @@ class OllamaClient:
                     attempted=True,
                     used_llm=False,
                     latency_ms=elapsed_ms,
-                    error="ollama_returned_empty_response",
+                    error="ollama_returned_empty_chat_content",
                     fallback_reason="empty_response",
                 )
-            return LLMResponse(text=text, attempted=True, used_llm=True, latency_ms=elapsed_ms)
+            json_data = _parse_json_object(text)
+            if json_data is None:
+                return LLMResponse(
+                    text=text,
+                    attempted=True,
+                    used_llm=True,
+                    latency_ms=elapsed_ms,
+                    error="ollama_returned_invalid_json",
+                    fallback_reason="invalid_json",
+                    json_data=None,
+                )
+            return LLMResponse(
+                text=text,
+                attempted=True,
+                used_llm=True,
+                latency_ms=elapsed_ms,
+                error=None,
+                fallback_reason=None,
+                json_data=json_data,
+            )
         except urllib.error.HTTPError as exc:
             elapsed_ms = (time.perf_counter() - start) * 1000.0
             body_text = _read_error_body(exc)
@@ -182,6 +223,34 @@ class OllamaClient:
                 error=f"ollama_error: {exc}",
                 fallback_reason="runtime_error",
             )
+
+    def generate(self, prompt: str) -> LLMResponse:
+        """Backward-compatible helper; prefer ``chat_json`` for recall."""
+
+        schema = {
+            "type": "object",
+            "properties": {"spoken_answer": {"type": "string"}},
+            "required": ["spoken_answer"],
+            "additionalProperties": False,
+        }
+        return self.chat_json([{"role": "user", "content": prompt}], schema)
+
+
+def _parse_json_object(text: str) -> dict[str, Any] | None:
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        # Some models wrap JSON in text despite schema mode. Recover only when a
+        # single clear object exists; otherwise reject so validation can log why.
+        start = text.find("{")
+        end = text.rfind("}")
+        if start < 0 or end <= start:
+            return None
+        try:
+            parsed = json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def _extract_model_names(payload: dict[str, Any]) -> list[str]:

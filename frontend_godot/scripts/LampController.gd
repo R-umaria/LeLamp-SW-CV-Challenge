@@ -169,7 +169,9 @@ func _update_motion_targets() -> void:
 	var t := _time
 	var motion := current_motion
 
-	if motion == "idle" or motion == "idle_breathe":
+	if motion == "sleep_rest" or motion == "sleep":
+		_set_target(0.0, -42.0, 70.0, -46.0, 0.0, -24.0)
+	elif motion == "idle" or motion == "idle_breathe":
 		_set_target(8.0 * sin(t * 0.65), -17.0 + 2.0 * sin(t * 1.0), 36.0, -18.0 + 2.5 * sin(t * 1.2), 0.0, 2.0 * sin(t * 1.1))
 	elif motion == "attentive_nod":
 		_set_target(0.0, -15.0, 34.0, -21.0 + 6.0 * sin(t * 4.2), 0.0, 7.0 * sin(t * 4.2))
@@ -205,10 +207,16 @@ func _smooth_to_targets(delta: float) -> void:
 
 
 func _update_light(_delta: float) -> void:
-	var energy := 0.6
-	var pulse := 0.0
+	var energy: float = 0.6
+	var pulse: float = 0.0
+	var head_color: Color = Color(1.0, 0.86, 0.48)
+	var marker_color: Color = Color(0.15, 0.45, 1.0)
 
-	if current_light == "dim_warm":
+	if current_light == "sleep_red":
+		energy = 0.12
+		head_color = Color(0.65, 0.04, 0.03)
+		marker_color = Color(0.65, 0.04, 0.03)
+	elif current_light == "dim_warm":
 		energy = 0.55
 	elif current_light == "steady_warm":
 		energy = 1.25
@@ -231,9 +239,13 @@ func _update_light(_delta: float) -> void:
 		spot_light.light_energy = energy
 
 	if head_material != null:
+		head_material.albedo_color = head_color
+		head_material.emission = head_color
 		head_material.emission_energy_multiplier = energy * 0.55
 
 	if front_marker_material != null:
+		front_marker_material.albedo_color = marker_color
+		front_marker_material.emission = marker_color
 		front_marker_material.emission_energy_multiplier = 0.7 + energy * 0.25
 
 	if cone_material != null:

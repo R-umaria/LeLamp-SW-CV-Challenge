@@ -1,4 +1,4 @@
-"""Milestone 4.1 parser regression tests.
+"""Milestone 4.3 parser regression tests.
 
 Run:
     python -m unittest backend.conversation.test_query_parser -v
@@ -12,7 +12,7 @@ from backend.conversation.query_parser import parse_object_query
 
 
 class QueryParserTests(unittest.TestCase):
-    def assert_parses_to(self, query: str, expected: str) -> None:
+    def assert_parses_to(self, query: str, expected: str | None) -> None:
         parsed = parse_object_query(query)
         self.assertEqual(parsed.normalized_label, expected, msg=parsed.to_dict())
 
@@ -30,6 +30,16 @@ class QueryParserTests(unittest.TestCase):
 
     def test_stapler_unknown_object_still_parses_as_target(self) -> None:
         self.assert_parses_to("Where is the stapler?", "stapler")
+
+    def test_did_you_see_if_i_had_stapler_does_not_parse_as_if(self) -> None:
+        parsed = parse_object_query("Did you see if I had a stapler?")
+        self.assertEqual(parsed.normalized_label, "stapler", msg=parsed.to_dict())
+        self.assertNotEqual(parsed.normalized_label, "if")
+
+    def test_list_query_does_not_parse_detected_as_object(self) -> None:
+        parsed = parse_object_query("What objects did you detect?")
+        self.assertIsNone(parsed.normalized_label, msg=parsed.to_dict())
+        self.assertEqual(parsed.strategy, "list_recent_objects_query")
 
 
 if __name__ == "__main__":

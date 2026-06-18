@@ -10,10 +10,11 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterator, Iterable, Optional
 
 
 BBox = tuple[int, int, int, int]
@@ -95,8 +96,17 @@ class MemoryStore:
         conn.row_factory = sqlite3.Row
         return conn
 
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        conn = self._connect()
+        try:
+            yield conn
+            conn.commit()
+        finally:
+            conn.close()
+
     def _init_db(self) -> None:
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS object_memory (
@@ -121,7 +131,7 @@ class MemoryStore:
 
     def insert(self, record: MemoryRecord) -> None:
         row = record.to_row()
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute(
                 """
                 INSERT INTO object_memory (
@@ -150,7 +160,7 @@ class MemoryStore:
             )
 
     def recent(self, limit: int = 20) -> list[MemoryRecord]:
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute(
                 """
                 SELECT * FROM object_memory
@@ -161,10 +171,32 @@ class MemoryStore:
             ).fetchall()
         return [self._row_to_record(row) for row in rows]
 
+
+    def recent_unique_by_normalized_label(self, limit: int = 8, row_limit: int = 200) -> list[MemoryRecord]:
+        """Return latest records for recent unique normalized labels.
+
+        SQLite remains the source of truth. This method is used for questions like
+        "What objects did you detect?" so the answer is grounded in stored rows,
+        not in the object detector vocabulary or LLM guesses.
+        """
+
+        records = self.recent(limit=max(int(row_limit), int(limit)))
+        seen: set[str] = set()
+        unique: list[MemoryRecord] = []
+        for record in records:
+            label = record.normalized_label.strip().lower()
+            if not label or label in seen:
+                continue
+            seen.add(label)
+            unique.append(record)
+            if len(unique) >= int(limit):
+                break
+        return unique
+
     def find(self, query: str, limit: int = 20) -> list[MemoryRecord]:
         normalized_query = query.strip().lower()
         like = f"%{normalized_query}%"
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute(
                 """
                 SELECT * FROM object_memory
@@ -182,7 +214,7 @@ class MemoryStore:
         if not normalized:
             return None
 
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 """
                 SELECT * FROM object_memory
@@ -204,7 +236,7 @@ class MemoryStore:
         """Return a same-label/same-location record inside the dedupe window."""
         cutoff = (now or datetime.now()) - timedelta(seconds=float(within_seconds))
         cutoff_text = cutoff.isoformat(timespec="seconds")
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 """
                 SELECT * FROM object_memory
@@ -219,12 +251,12 @@ class MemoryStore:
         return self._row_to_record(row) if row else None
 
     def clear(self) -> int:
-        with self._connect() as conn:
+        with self._connection() as conn:
             cursor = conn.execute("DELETE FROM object_memory")
             return int(cursor.rowcount if cursor.rowcount is not None else 0)
 
     def count(self) -> int:
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute("SELECT COUNT(*) AS count FROM object_memory").fetchone()
         return int(row["count"] if row else 0)
 

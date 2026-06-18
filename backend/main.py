@@ -28,6 +28,7 @@ from backend.behavior.behavior_policy import behavior_for_state
 from backend.behavior.command_protocol import build_behavior_command
 from backend.behavior.godot_udp_sender import GodotUdpSender
 from backend.behavior.state_machine import InteractionStateMachine, LampState
+from backend.conversation.chat_udp_receiver import ChatUdpReceiver
 from backend.conversation.recall_agent import RecallAgent
 from backend.evaluation.latency_logger import LatencyLogger
 from backend.memory.scene_memory import SceneMemory
@@ -87,10 +88,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--object-frame-dir", type=str, default="data/object_frames", help="Directory for saved object evidence frames.")
 
     parser.add_argument("--interactive-recall", action="store_true", help="Allow text recall questions while the backend is running.")
+    parser.add_argument("--enable-godot-chat", action="store_true", help="Listen for live chat queries from Godot over local UDP.")
+    parser.add_argument("--chat-host", type=str, default="127.0.0.1", help="Backend UDP host for Godot chat messages.")
+    parser.add_argument("--chat-port", type=int, default=4243, help="Backend UDP port for Godot chat messages.")
     parser.add_argument("--use-llm", action="store_true", help="Use Ollama/local LLM only to phrase retrieved memory answers.")
     parser.add_argument("--ollama-url", type=str, default="http://localhost:11434", help="Ollama base URL for --use-llm.")
     parser.add_argument("--ollama-model", type=str, default="llama3.2", help="Ollama model for recall phrasing, e.g. llama3.2 or qwen2.5.")
-    parser.add_argument("--ollama-timeout", type=float, default=8.0, help="Ollama generate timeout in seconds for recall phrasing.")
+    parser.add_argument("--ollama-timeout", type=float, default=8.0, help="Ollama chat timeout in seconds for recall phrasing.")
+    parser.add_argument("--llm-required", action="store_true", help="Fail fast at startup if Ollama/model is unavailable; live answers still fall back but log failures.")
 
     window_group = parser.add_mutually_exclusive_group()
     window_group.add_argument("--show-window", action="store_true", default=True)
@@ -252,13 +257,14 @@ def main() -> int:
     recall_agent = None
     recall_queue: queue.Queue[str] | None = None
     recall_stop_event = threading.Event()
-    if args.interactive_recall:
+    if args.interactive_recall or args.enable_godot_chat:
         recall_log_paths = [run_paths.run_dir / "recall.jsonl"]
         if not args.no_latest:
             recall_log_paths.append(run_paths.latest_dir / "recall.jsonl")
         recall_agent = RecallAgent(
             memory_db=args.memory_db,
             use_llm=args.use_llm,
+            llm_required=args.llm_required,
             ollama_url=args.ollama_url,
             ollama_model=args.ollama_model,
             ollama_timeout_s=args.ollama_timeout,
@@ -266,9 +272,33 @@ def main() -> int:
             logger=logger,
         )
         recall_queue = queue.Queue()
-        start_recall_input_thread(recall_queue, recall_stop_event, logger)
+        if args.interactive_recall:
+            start_recall_input_thread(recall_queue, recall_stop_event, logger)
 
-    logger.info("Starting Milestone 4 backend with isolated run logging")
+    chat_receiver = None
+    if args.enable_godot_chat:
+        if recall_queue is None:
+            recall_queue = queue.Queue()
+        chat_receiver = ChatUdpReceiver(
+            output_queue=recall_queue,
+            host=args.chat_host,
+            port=args.chat_port,
+            logger=logger,
+        )
+        chat_receiver.start()
+
+    if args.use_llm and args.llm_required and recall_agent is not None:
+        status = recall_agent.ollama_status
+        if status is None or not (status.ok and status.model_available):
+            logger.error(
+                "--llm-required startup check failed url=%s model=%s error=%s",
+                args.ollama_url,
+                args.ollama_model,
+                None if status is None else status.error,
+            )
+            return 1
+
+    logger.info("Starting Milestone 4.3 backend with isolated run logging")
     logger.info("Run id=%s", run_paths.run_id)
     logger.info("Run directory=%s", run_paths.run_dir)
     if not args.no_latest:
@@ -299,9 +329,13 @@ def main() -> int:
     )
     logger.info("Commands will be saved to %s", commands_path)
     logger.info(
-        "Recall config interactive=%s use_llm=%s ollama_url=%s ollama_model=%s ollama_timeout=%.1fs",
+        "Recall config interactive=%s godot_chat=%s chat_udp=%s:%s use_llm=%s llm_required=%s ollama_url=%s ollama_model=%s ollama_timeout=%.1fs",
         args.interactive_recall,
+        args.enable_godot_chat,
+        args.chat_host,
+        args.chat_port,
         args.use_llm,
+        args.llm_required,
         args.ollama_url,
         args.ollama_model,
         args.ollama_timeout,
@@ -508,7 +542,7 @@ def main() -> int:
                 )
                 if object_detector.enabled:
                     draw_object_overlay(frame, display_detections)
-                cv2.imshow("LeLamp Milestone 4 - Engagement/Object Memory/Recall", frame)
+                cv2.imshow("LeLamp Milestone 4.3 - Engagement/Object Memory/Live Recall", frame)
                 key = cv2.waitKey(1) & 0xFF
                 if key in (27, ord("q")):
                     logger.info("Quit requested from preview window")
@@ -526,6 +560,8 @@ def main() -> int:
         return 1
     finally:
         recall_stop_event.set()
+        if chat_receiver is not None:
+            chat_receiver.stop()
         godot_sender.close()
         camera.release()
         if runtime_config.show_window:
