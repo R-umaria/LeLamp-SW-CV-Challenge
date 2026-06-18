@@ -1,6 +1,6 @@
-"""UDP chat-query receiver for the Godot live chat panel.
+"""Legacy UDP chat-query receiver for pre-4.3.2 Godot builds.
 
-Godot sends JSON packets to this backend-side listener:
+Older Godot builds could send JSON packets to this backend-side listener:
 
     {
       "type": "chat_query",

@@ -147,7 +147,7 @@ class OllamaClient:
         messages: Sequence[Mapping[str, str]],
         schema: Mapping[str, Any],
         *,
-        max_tokens: int = 180,
+        max_tokens: int = 120,
     ) -> LLMResponse:
         """Call Ollama ``/api/chat`` and request a JSON object matching ``schema``."""
 
@@ -331,6 +331,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ollama-model", type=str, default="qwen2.5:1.5b")
     parser.add_argument("--llm-timeout", type=float, default=90.0)
     parser.add_argument("--llm-connect-timeout", type=float, default=5.0)
+    parser.add_argument("--llm-max-tokens", type=int, default=120)
     parser.add_argument("--ollama-keep-alive", type=str, default="1h")
     parser.add_argument("--warm-ollama", action="store_true")
     parser.add_argument("--json", action="store_true")

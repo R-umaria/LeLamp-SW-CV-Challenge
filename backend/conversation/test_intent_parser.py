@@ -41,6 +41,12 @@ class IntentParserTests(unittest.TestCase):
     def test_was_there_any_pen_in_view(self) -> None:
         self.assert_intent("Was there any pen in the view?", ConversationIntentType.OBJECT_LAST_SEEN, "pen")
 
+    def test_was_there_any_tv_followup_maps_to_monitor(self) -> None:
+        self.assert_intent("was there any tv? If so, where was it?", ConversationIntentType.OBJECT_LAST_SEEN, "monitor")
+
+    def test_was_there_any_tv_maps_to_monitor(self) -> None:
+        self.assert_intent("Was there any TV?", ConversationIntentType.OBJECT_LAST_SEEN, "monitor")
+
     def test_unsupported_chitchat(self) -> None:
         self.assert_intent("Tell me a joke", ConversationIntentType.UNSUPPORTED, None)
 

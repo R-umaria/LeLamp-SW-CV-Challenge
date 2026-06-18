@@ -128,6 +128,7 @@ class RecallAgent:
         llm_timeout_s: float = 90.0,
         llm_connect_timeout_s: float = 5.0,
         ollama_keep_alive: str = "1h",
+        llm_max_tokens: int = 120,
         recent_object_limit: int = 8,
         log_paths: str | Path | Iterable[str | Path] | None = None,
         logger: logging.Logger | None = None,
@@ -137,6 +138,7 @@ class RecallAgent:
         self.use_llm = bool(use_llm)
         self.llm_required = bool(llm_required)
         self.recent_object_limit = int(recent_object_limit)
+        self.llm_max_tokens = max(32, int(llm_max_tokens))
         self.logger = logger or logging.getLogger("lelamp")
         self.log_paths = _coerce_paths(log_paths)
         self.ollama: OllamaClient | None = None
@@ -290,7 +292,7 @@ class RecallAgent:
             return LLMResponse("", attempted=False, used_llm=False, latency_ms=0.0, error=self.ollama_status.error or f"model_not_found: {self.ollama.model}", fallback_reason="model_unavailable")
 
         messages = build_structured_messages(user_query, intent, memory_record, recent_records)
-        return self.ollama.chat_json(messages, RECALL_RESPONSE_SCHEMA, max_tokens=180)
+        return self.ollama.chat_json(messages, RECALL_RESPONSE_SCHEMA, max_tokens=self.llm_max_tokens)
 
     def _log_result(self, result: RecallResult) -> None:
         payload = result.to_dict()
@@ -326,7 +328,6 @@ def build_structured_messages(
         "user_query": user_query,
         "intent": intent.intent.value,
         "parsed_object": intent.normalized_label,
-        "schema": RECALL_RESPONSE_SCHEMA,
     }
 
     if intent.intent == ConversationIntentType.OBJECT_LAST_SEEN and memory_record is not None:
@@ -353,8 +354,8 @@ def build_structured_messages(
         facts["fallback_answer"] = deterministic_recent_objects_answer(recent_records)
 
     user_content = (
-        "Use only these backend-provided memory facts. Return exactly one JSON object.\n"
-        + json.dumps(facts, ensure_ascii=False, indent=2)
+        "Use only these backend-provided memory facts. Return one short JSON answer.\n"
+        + json.dumps(facts, ensure_ascii=False, separators=(",", ":"))
     )
     return [
         {"role": "system", "content": SYSTEM_MESSAGE},
@@ -621,6 +622,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ollama-model", type=str, default="qwen2.5:1.5b", help="Ollama model, e.g. qwen2.5:1.5b")
     parser.add_argument("--llm-timeout", type=float, default=90.0, help="Ollama full chat/read timeout in seconds")
     parser.add_argument("--llm-connect-timeout", type=float, default=5.0, help="Ollama connection/status timeout in seconds")
+    parser.add_argument("--llm-max-tokens", type=int, default=120, help="Maximum Ollama output tokens for recall phrasing")
     parser.add_argument("--ollama-keep-alive", type=str, default="1h", help="Ollama keep_alive duration, e.g. 1h")
     parser.add_argument("--ollama-timeout", type=float, default=None, help="Backward-compatible alias for --llm-timeout")
     parser.add_argument("--test-ollama", action="store_true", help="Check Ollama connectivity/model availability and exit")
@@ -687,6 +689,7 @@ def main() -> int:
         llm_timeout_s=llm_timeout,
         llm_connect_timeout_s=args.llm_connect_timeout,
         ollama_keep_alive=args.ollama_keep_alive,
+        llm_max_tokens=args.llm_max_tokens,
         log_paths=args.log_path,
     )
     result = agent.answer(args.query)

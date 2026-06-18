@@ -1,10 +1,10 @@
-"""Browser chat server for Milestone 4.3.1.
+"""Non-blocking browser chat server for Milestone 4.3.2.
 
-This module intentionally uses only the Python standard library. It gives the
-final demo a reliable browser input surface while keeping Python as the owner of
-memory retrieval and LLM response generation. Godot remains display/embodiment:
-a callback in ``backend.main`` sends the same existing UDP command shape after a
-browser query is answered.
+The browser is the final-demo text input surface. POST /chat enqueues a
+question and returns immediately with a request_id. The UI then polls
+GET /chat/result?request_id=... until the backend recall worker stores the
+answer. Python remains the owner of recall, memory, and LLM calls; Godot only
+receives the unchanged behavior command JSON for display/animation.
 """
 
 from __future__ import annotations
@@ -14,34 +14,33 @@ import logging
 import queue
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 
-@dataclass
+@dataclass(frozen=True)
 class WebChatRequest:
     """Request object passed from the HTTP thread to the backend loop."""
 
     text: str
+    request_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     created_at: float = field(default_factory=time.monotonic)
-    reply_queue: "queue.Queue[dict[str, Any]]" = field(default_factory=lambda: queue.Queue(maxsize=1))
-
-    def set_result(self, payload: dict[str, Any]) -> None:
-        self.reply_queue.put(payload)
+    source: str = "browser"
 
 
 class WebChatServer:
-    """Small threaded HTTP server for grounded recall chat."""
+    """Small threaded HTTP server for non-blocking grounded recall chat."""
 
     def __init__(
         self,
         output_queue: "queue.Queue[object]",
         host: str = "127.0.0.1",
         port: int = 8765,
-        request_timeout_s: float = 120.0,
+        request_timeout_s: float = 180.0,
         logger: logging.Logger | None = None,
     ) -> None:
         self.output_queue = output_queue
@@ -51,6 +50,8 @@ class WebChatServer:
         self.logger = logger or logging.getLogger("lelamp")
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
+        self._lock = threading.Lock()
+        self._results: dict[str, dict[str, Any]] = {}
 
     @property
     def url(self) -> str:
@@ -63,7 +64,7 @@ class WebChatServer:
         parent = self
 
         class Handler(BaseHTTPRequestHandler):
-            server_version = "LeLampWebChat/4.3.1"
+            server_version = "LeLampWebChat/4.3.2"
 
             def log_message(self, fmt: str, *args: object) -> None:  # noqa: D401 - stdlib override
                 parent.logger.info("web_chat %s - " + fmt, self.address_string(), *args)
@@ -75,6 +76,18 @@ class WebChatServer:
                     return
                 if parsed.path == "/health":
                     self._send_json({"ok": True, "status": "backend connected", "url": parent.url})
+                    return
+                if parsed.path == "/chat/result":
+                    params = parse_qs(parsed.query)
+                    request_id = str((params.get("request_id") or [""])[0]).strip()
+                    if not request_id:
+                        self._send_json({"ok": False, "error": "missing_request_id"}, status=HTTPStatus.BAD_REQUEST)
+                        return
+                    result = parent.get_result(request_id)
+                    if result is None:
+                        self._send_json({"ok": False, "error": "unknown_request_id"}, status=HTTPStatus.NOT_FOUND)
+                        return
+                    self._send_json(result)
                     return
                 self._send_json({"ok": False, "error": "not_found"}, status=HTTPStatus.NOT_FOUND)
 
@@ -109,22 +122,23 @@ class WebChatServer:
                     return
 
                 request = WebChatRequest(text=text)
+                parent.mark_queued(request.request_id, text)
                 parent.output_queue.put(request)
-                try:
-                    response_payload = request.reply_queue.get(timeout=parent.request_timeout_s)
-                except queue.Empty:
-                    parent.logger.warning("Browser chat request timed out text=%r", text)
-                    self._send_json(
-                        {
-                            "ok": False,
-                            "error": "backend_chat_timeout",
-                            "answer": "The backend did not finish the recall request in time.",
-                        },
-                        status=HTTPStatus.GATEWAY_TIMEOUT,
-                    )
-                    return
-
-                self._send_json(response_payload)
+                parent.logger.info(
+                    "recall_request_queued source=browser request_id=%s text=%r",
+                    request.request_id,
+                    text,
+                )
+                self._send_json(
+                    {
+                        "ok": True,
+                        "status": "queued",
+                        "request_id": request.request_id,
+                        "answer": None,
+                        "message": "Thinking...",
+                    },
+                    status=HTTPStatus.ACCEPTED,
+                )
 
             def _send_html(self, html: str) -> None:
                 body = html.encode("utf-8")
@@ -149,6 +163,54 @@ class WebChatServer:
         self._thread = threading.Thread(target=self._server.serve_forever, name="web-chat-server", daemon=True)
         self._thread.start()
         self.logger.info("Browser chat server listening at %s", self.url)
+
+    def mark_queued(self, request_id: str, text: str) -> None:
+        with self._lock:
+            self._results[request_id] = {
+                "ok": True,
+                "request_id": request_id,
+                "status": "queued",
+                "answer": None,
+                "user_query": text,
+                "message": "Thinking...",
+                "created_at": time.time(),
+            }
+
+    def mark_started(self, request_id: str) -> None:
+        with self._lock:
+            current = self._results.get(request_id)
+            if current is not None and current.get("status") != "done":
+                current["status"] = "running"
+                current["message"] = "Thinking..."
+
+    def set_result(self, request_id: str, payload: dict[str, Any]) -> None:
+        final_payload = dict(payload)
+        final_payload.setdefault("ok", True)
+        final_payload["request_id"] = request_id
+        final_payload["status"] = "done"
+        with self._lock:
+            previous = self._results.get(request_id, {})
+            final_payload["created_at"] = previous.get("created_at", time.time())
+            self._results[request_id] = final_payload
+            self._prune_locked()
+
+    def set_error(self, request_id: str, error: str, answer: str = "The recall request failed.") -> None:
+        self.set_result(request_id, {"ok": False, "error": error, "answer": answer})
+
+    def get_result(self, request_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            result = self._results.get(request_id)
+            if result is None:
+                return None
+            return dict(result)
+
+    def _prune_locked(self) -> None:
+        if len(self._results) < 128:
+            return
+        cutoff = time.time() - max(300.0, self.request_timeout_s * 2.0)
+        stale_ids = [rid for rid, payload in self._results.items() if float(payload.get("created_at", cutoff)) < cutoff]
+        for rid in stale_ids:
+            self._results.pop(rid, None)
 
     def stop(self) -> None:
         if self._server is None:
@@ -179,6 +241,7 @@ _HTML = r"""<!doctype html>
     .msg { padding: 10px 12px; border-radius: 10px; white-space: pre-wrap; line-height: 1.35; }
     .user { align-self: flex-end; max-width: 80%; background: #26395f; }
     .lamp { align-self: flex-start; max-width: 90%; background: #272a32; }
+    .pending { opacity: 0.78; font-style: italic; }
     .meta { margin-top: 8px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; color: #c7c7cc; white-space: pre-wrap; }
     form { display: flex; gap: 8px; margin-top: 16px; }
     input { flex: 1; padding: 12px; border-radius: 10px; border: 1px solid #3a3d46; background: #0d0f13; color: #f4f4f5; font-size: 16px; }
@@ -198,7 +261,7 @@ _HTML = r"""<!doctype html>
         <input id="text" autocomplete="off" placeholder="Where did you last see my phone?" autofocus />
         <button id="send" type="submit">Send</button>
       </form>
-      <div class="hint">Use this browser page for the final demo. Do not type demo questions into the Godot text box or paste PowerShell into terminal recall.</div>
+      <div class="hint">Final demo input lives here. Godot only displays the lamp state and recall answer.</div>
     </section>
   </main>
 <script>
@@ -207,10 +270,11 @@ const formEl = document.getElementById('form');
 const inputEl = document.getElementById('text');
 const sendEl = document.getElementById('send');
 const statusEl = document.getElementById('status');
+const pollTimers = new Map();
 
-function addMessage(kind, text, meta) {
+function addMessage(kind, text, meta, extraClass) {
   const div = document.createElement('div');
-  div.className = 'msg ' + kind;
+  div.className = 'msg ' + kind + (extraClass ? ' ' + extraClass : '');
   const body = document.createElement('div');
   body.textContent = text;
   div.appendChild(body);
@@ -222,19 +286,64 @@ function addMessage(kind, text, meta) {
   }
   historyEl.appendChild(div);
   historyEl.scrollTop = historyEl.scrollHeight;
+  return div;
+}
+
+function updateMessage(div, text, meta, extraClass) {
+  div.className = 'msg lamp' + (extraClass ? ' ' + extraClass : '');
+  div.innerHTML = '';
+  const body = document.createElement('div');
+  body.textContent = text;
+  div.appendChild(body);
+  if (meta) {
+    const m = document.createElement('div');
+    m.className = 'meta';
+    m.textContent = meta;
+    div.appendChild(m);
+  }
+  historyEl.scrollTop = historyEl.scrollHeight;
 }
 
 function summarizeMeta(data) {
   const memory = data.memory_record || null;
   const retrieved = memory ? `${memory.normalized_label} @ ${memory.location_label} conf=${memory.confidence} time=${memory.timestamp}` : 'none';
   return [
+    `request_id=${data.request_id || 'none'}`,
     `answer_type=${data.answer_type || 'unknown'}`,
     `llm_used=${data.llm_used}`,
     `llm_attempted=${data.llm_attempted}`,
+    `llm_response_ms=${data.llm_response_ms ?? 'none'}`,
+    `recall_worker_ms=${data.recall_worker_ms ?? 'none'}`,
     `llm_error=${data.llm_error || 'none'}`,
     `llm_fallback_reason=${data.llm_fallback_reason || 'none'}`,
     `retrieved_memory=${retrieved}`
   ].join('\n');
+}
+
+async function pollResult(requestId, pendingDiv, startedAt) {
+  try {
+    const response = await fetch(`/chat/result?request_id=${encodeURIComponent(requestId)}`);
+    const data = await response.json();
+    if (!response.ok || data.ok === false) {
+      updateMessage(pendingDiv, data.answer || 'Request failed.', `request_id=${requestId}\nerror=${data.error || response.status}`);
+      statusEl.textContent = 'backend connected · last request failed';
+      pollTimers.delete(requestId);
+      return;
+    }
+    if (data.status === 'queued' || data.status === 'running') {
+      const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+      updateMessage(pendingDiv, `Thinking... (${elapsed}s)`, `request_id=${requestId}\nstatus=${data.status}`, 'pending');
+      pollTimers.set(requestId, setTimeout(() => pollResult(requestId, pendingDiv, startedAt), 1000));
+      return;
+    }
+    updateMessage(pendingDiv, data.answer || '(empty answer)', summarizeMeta(data));
+    statusEl.textContent = 'backend connected · last answer received';
+    pollTimers.delete(requestId);
+  } catch (err) {
+    updateMessage(pendingDiv, 'Browser could not reach the backend chat result endpoint.', `request_id=${requestId}\nerror=${err}`);
+    statusEl.textContent = 'backend connection failed';
+    pollTimers.delete(requestId);
+  }
 }
 
 formEl.addEventListener('submit', async (event) => {
@@ -244,7 +353,7 @@ formEl.addEventListener('submit', async (event) => {
   inputEl.value = '';
   addMessage('user', text);
   sendEl.disabled = true;
-  statusEl.textContent = 'backend connected · waiting for recall answer...';
+  statusEl.textContent = 'backend connected · queued recall request';
   try {
     const response = await fetch('/chat', {
       method: 'POST',
@@ -252,13 +361,13 @@ formEl.addEventListener('submit', async (event) => {
       body: JSON.stringify({text})
     });
     const data = await response.json();
-    if (!response.ok || data.ok === false) {
+    if (!response.ok || data.ok === false || !data.request_id) {
       addMessage('lamp', data.answer || 'Request failed.', `error=${data.error || response.status}`);
-      statusEl.textContent = 'backend connected · last request failed';
-    } else {
-      addMessage('lamp', data.answer || '(empty answer)', summarizeMeta(data));
-      statusEl.textContent = 'backend connected · last answer received';
+      statusEl.textContent = 'backend connected · request failed';
+      return;
     }
+    const pendingDiv = addMessage('lamp', 'Thinking...', `request_id=${data.request_id}\nstatus=queued`, 'pending');
+    pollResult(data.request_id, pendingDiv, Date.now());
   } catch (err) {
     addMessage('lamp', 'Browser could not reach the backend chat endpoint.', `error=${err}`);
     statusEl.textContent = 'backend connection failed';

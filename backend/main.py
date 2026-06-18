@@ -30,6 +30,7 @@ from backend.behavior.godot_udp_sender import GodotUdpSender
 from backend.behavior.state_machine import InteractionStateMachine, LampState
 from backend.conversation.chat_udp_receiver import ChatUdpReceiver
 from backend.conversation.recall_agent import RecallAgent
+from backend.conversation.recall_worker import RecallWorker, RecallWorkItem, RecallWorkResult
 from backend.conversation.web_chat_server import WebChatRequest, WebChatServer
 from backend.evaluation.latency_logger import LatencyLogger
 from backend.memory.scene_memory import SceneMemory
@@ -100,6 +101,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ollama-model", type=str, default="qwen2.5:1.5b", help="Ollama model for recall phrasing, e.g. qwen2.5:1.5b.")
     parser.add_argument("--llm-timeout", type=float, default=90.0, help="Ollama full chat/read timeout in seconds for recall phrasing.")
     parser.add_argument("--llm-connect-timeout", type=float, default=5.0, help="Ollama connection/status timeout in seconds.")
+    parser.add_argument("--llm-max-tokens", type=int, default=120, help="Maximum Ollama output tokens for recall phrasing.")
     parser.add_argument("--ollama-keep-alive", type=str, default="1h", help="Ollama keep_alive duration, e.g. 1h.")
     parser.add_argument("--ollama-timeout", type=float, default=None, help="Backward-compatible alias for --llm-timeout.")
     parser.add_argument("--llm-required", action="store_true", help="Fail fast at startup if Ollama/model is unavailable; live answers still fall back but log failures.")
@@ -303,6 +305,9 @@ def main() -> int:
 
     recall_agent = None
     recall_queue: queue.Queue[object] | None = None
+    recall_result_queue: queue.Queue[RecallWorkResult] | None = None
+    recall_worker: RecallWorker | None = None
+    pending_recalls: dict[str, dict] = {}
     recall_stop_event = threading.Event()
     if args.interactive_recall or args.enable_godot_chat or args.enable_web_chat:
         recall_log_paths = [run_paths.run_dir / "recall.jsonl"]
@@ -317,10 +322,14 @@ def main() -> int:
             llm_timeout_s=llm_timeout,
             llm_connect_timeout_s=args.llm_connect_timeout,
             ollama_keep_alive=args.ollama_keep_alive,
+            llm_max_tokens=args.llm_max_tokens,
             log_paths=recall_log_paths,
             logger=logger,
         )
         recall_queue = queue.Queue()
+        recall_result_queue = queue.Queue()
+        recall_worker = RecallWorker(recall_agent, recall_result_queue, logger=logger)
+        recall_worker.start()
         if args.interactive_recall:
             start_recall_input_thread(recall_queue, recall_stop_event, logger)
 
@@ -360,7 +369,7 @@ def main() -> int:
             )
             return 1
 
-    logger.info("Starting Milestone 4.3.1 backend with browser chat and homelab Ollama support")
+    logger.info("Starting Milestone 4.3.2 backend with non-blocking browser chat and homelab Ollama support")
     logger.info("Run id=%s", run_paths.run_id)
     logger.info("Run directory=%s", run_paths.run_dir)
     if not args.no_latest:
@@ -391,7 +400,7 @@ def main() -> int:
     )
     logger.info("Commands will be saved to %s", commands_path)
     logger.info(
-        "Recall config interactive=%s godot_chat=%s web_chat=%s web_url=http://%s:%s chat_udp=%s:%s use_llm=%s llm_required=%s ollama_url=%s ollama_model=%s llm_timeout=%.1fs connect_timeout=%.1fs keep_alive=%s",
+        "Recall config interactive=%s godot_chat=%s web_chat=%s web_url=http://%s:%s chat_udp=%s:%s use_llm=%s llm_required=%s ollama_url=%s ollama_model=%s llm_timeout=%.1fs connect_timeout=%.1fs llm_max_tokens=%s keep_alive=%s",
         args.interactive_recall,
         args.enable_godot_chat,
         args.enable_web_chat,
@@ -405,6 +414,7 @@ def main() -> int:
         args.ollama_model,
         llm_timeout,
         args.llm_connect_timeout,
+        args.llm_max_tokens,
         args.ollama_keep_alive,
     )
     if godot_udp_config.enabled:
@@ -437,6 +447,8 @@ def main() -> int:
             llm_attempted = ""
             llm_used = ""
             llm_error = ""
+            llm_fallback_reason = ""
+            recall_worker_ms = ""
             memory_write_count = 0
             memory_duplicate_skip_count = 0
             now = time.monotonic()
@@ -512,13 +524,7 @@ def main() -> int:
                     smoothed_engagement.confidence,
                 )
 
-            if should_emit:
-                print(json.dumps(command, ensure_ascii=False), flush=True)
-                append_jsonl(command_paths, command)
-                last_godot_udp_send_ms = godot_sender.send(command)
-                last_emit_at = now
-
-            if recall_agent is not None and recall_queue is not None:
+            if recall_worker is not None and recall_queue is not None and recall_result_queue is not None:
                 while True:
                     try:
                         recall_item = recall_queue.get_nowait()
@@ -527,46 +533,116 @@ def main() -> int:
 
                     web_request = recall_item if isinstance(recall_item, WebChatRequest) else None
                     recall_query = web_request.text if web_request is not None else str(recall_item)
-                    recall_result = recall_agent.answer(recall_query)
-                    memory_retrieval_ms = round(recall_result.memory_retrieval_ms, 3)
-                    llm_response_ms = (
-                        "" if recall_result.llm_response_ms is None else round(recall_result.llm_response_ms, 3)
+                    source = "browser" if web_request is not None else "terminal_or_udp"
+                    request_id = web_request.request_id if web_request is not None else RecallWorkItem(text=recall_query, source=source).request_id
+                    work_item = RecallWorkItem(text=recall_query, request_id=request_id, source=source)
+                    pending_recalls[request_id] = {"source": source, "text": recall_query, "queued_at": time.monotonic()}
+                    if web_request is not None and web_chat_server is not None:
+                        web_chat_server.mark_started(request_id)
+                    logger.info(
+                        "recall_request_queued source=%s request_id=%s text=%r pending=%s",
+                        source,
+                        request_id,
+                        recall_query,
+                        len(pending_recalls),
                     )
-                    llm_attempted = recall_result.llm_attempted
-                    llm_used = recall_result.llm_used
-                    llm_error = recall_result.llm_error or ""
-                    recall_command = build_behavior_command(
+                    thinking_command = build_behavior_command(
                         state=LampState.RECALLING,
                         engagement=smoothed_engagement,
                         behavior={
                             "motion": "thinking",
                             "light": "focus_glow",
                             "sound": None,
-                            "speech_text": recall_result.answer,
+                            "speech_text": "Thinking...",
                         },
                         last_detected_objects=last_detected_objects,
                     )
-                    print(json.dumps(recall_command, ensure_ascii=False), flush=True)
-                    append_jsonl(command_paths, recall_command)
-                    last_godot_udp_send_ms = godot_sender.send(recall_command)
+                    print(json.dumps(thinking_command, ensure_ascii=False), flush=True)
+                    append_jsonl(command_paths, thinking_command)
+                    last_godot_udp_send_ms = godot_sender.send(thinking_command)
                     last_emit_at = time.monotonic()
-                    if web_request is not None:
-                        response_payload = recall_result.to_dict()
-                        response_payload["ok"] = not recall_result.llm_required_failed
-                        if recall_result.llm_required_failed:
-                            response_payload["error"] = "llm_required_failed"
-                        response_payload["godot_command_sent"] = bool(godot_udp_config.enabled)
-                        response_payload["godot_udp_ms"] = last_godot_udp_send_ms
-                        web_request.set_result(response_payload)
+                    should_emit = False
+                    recall_worker.submit(work_item)
+
+                while True:
+                    try:
+                        work_result = recall_result_queue.get_nowait()
+                    except queue.Empty:
+                        break
+
+                    pending_recalls.pop(work_result.request_id, None)
+                    response_payload = work_result.response_payload()
+                    recall_worker_ms = round(work_result.worker_ms, 3)
+                    answer_text = response_payload.get("answer") or "The recall request failed."
+
+                    if work_result.result is not None:
+                        recall_result = work_result.result
+                        memory_retrieval_ms = round(recall_result.memory_retrieval_ms, 3)
+                        llm_response_ms = (
+                            "" if recall_result.llm_response_ms is None else round(recall_result.llm_response_ms, 3)
+                        )
+                        llm_attempted = recall_result.llm_attempted
+                        llm_used = recall_result.llm_used
+                        llm_error = recall_result.llm_error or ""
+                        llm_fallback_reason = recall_result.llm_fallback_reason or ""
+                    else:
+                        llm_attempted = False
+                        llm_used = False
+                        llm_error = work_result.error or "worker_error"
+                        llm_fallback_reason = "worker_error"
+
+                    final_recall_command = build_behavior_command(
+                        state=LampState.RECALLING,
+                        engagement=smoothed_engagement,
+                        behavior={
+                            "motion": "thinking",
+                            "light": "focus_glow",
+                            "sound": None,
+                            "speech_text": str(answer_text),
+                        },
+                        last_detected_objects=last_detected_objects,
+                    )
+                    print(json.dumps(final_recall_command, ensure_ascii=False), flush=True)
+                    append_jsonl(command_paths, final_recall_command)
+                    last_godot_udp_send_ms = godot_sender.send(final_recall_command)
+                    last_emit_at = time.monotonic()
+                    should_emit = False
+
+                    response_payload["godot_command_sent"] = bool(godot_udp_config.enabled)
+                    response_payload["godot_udp_ms"] = last_godot_udp_send_ms
+                    if work_result.source == "browser" and web_chat_server is not None:
+                        web_chat_server.set_result(work_result.request_id, response_payload)
 
                     logger.info(
-                        "Sent recall command to Godot state=recalling source=%s parsed_object=%s memory_id=%s llm_attempted=%s llm_used=%s",
-                        "browser" if web_request is not None else "terminal_or_udp",
-                        recall_result.parsed_object,
-                        recall_result.memory_record.id if recall_result.memory_record else None,
-                        recall_result.llm_attempted,
-                        recall_result.llm_used,
+                        "Sent recall command to Godot state=recalling source=%s request_id=%s parsed_object=%s memory_id=%s recall_worker_ms=%s llm_attempted=%s llm_used=%s fallback_reason=%s",
+                        work_result.source,
+                        work_result.request_id,
+                        None if work_result.result is None else work_result.result.parsed_object,
+                        None if work_result.result is None or work_result.result.memory_record is None else work_result.result.memory_record.id,
+                        recall_worker_ms,
+                        llm_attempted,
+                        llm_used,
+                        llm_fallback_reason or "none",
                     )
+
+            if should_emit:
+                outgoing_command = command
+                if pending_recalls:
+                    outgoing_command = build_behavior_command(
+                        state=LampState.RECALLING,
+                        engagement=smoothed_engagement,
+                        behavior={
+                            "motion": "thinking",
+                            "light": "focus_glow",
+                            "sound": None,
+                            "speech_text": "Thinking...",
+                        },
+                        last_detected_objects=last_detected_objects,
+                    )
+                print(json.dumps(outgoing_command, ensure_ascii=False), flush=True)
+                append_jsonl(command_paths, outgoing_command)
+                last_godot_udp_send_ms = godot_sender.send(outgoing_command)
+                last_emit_at = now
 
             latency_logger.append(
                 {
@@ -581,6 +657,9 @@ def main() -> int:
                     "llm_attempted": llm_attempted,
                     "llm_used": llm_used,
                     "llm_error": llm_error,
+                    "llm_fallback_reason": llm_fallback_reason,
+                    "recall_worker_ms": recall_worker_ms,
+                    "pending_recall_count": len(pending_recalls),
                     "smoothing_ms": round(smoothing_ms, 3),
                     "state_machine_ms": round(state_machine_ms, 3),
                     "command_build_ms": round(command_ms, 3),
@@ -621,7 +700,7 @@ def main() -> int:
                 )
                 if object_detector.enabled:
                     draw_object_overlay(frame, display_detections)
-                cv2.imshow("LeLamp Milestone 4.3.1 - Engagement/Object Memory/Browser Recall", frame)
+                cv2.imshow("LeLamp Milestone 4.3.2 - Engagement/Object Memory/Browser Recall", frame)
                 key = cv2.waitKey(1) & 0xFF
                 if key in (27, ord("q")):
                     logger.info("Quit requested from preview window")
@@ -641,13 +720,15 @@ def main() -> int:
         recall_stop_event.set()
         if chat_receiver is not None:
             chat_receiver.stop()
+        if recall_worker is not None:
+            recall_worker.stop()
         if web_chat_server is not None:
             web_chat_server.stop()
         godot_sender.close()
         camera.release()
         if runtime_config.show_window:
             cv2.destroyAllWindows()
-        logger.info("Stopped Milestone 4.3.1 backend")
+        logger.info("Stopped Milestone 4.3.2 backend")
 
     return 0
 

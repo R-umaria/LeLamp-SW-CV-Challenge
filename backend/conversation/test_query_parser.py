@@ -49,6 +49,16 @@ class QueryParserTests(unittest.TestCase):
         self.assertEqual(parsed.normalized_label, "pen", msg=parsed.to_dict())
         self.assertEqual(parsed.strategy, "existence_object_pattern")
 
+    def test_was_there_any_tv_followup_maps_to_monitor(self) -> None:
+        parsed = parse_object_query("was there any tv? If so, where was it?")
+        self.assertEqual(parsed.normalized_label, "monitor", msg=parsed.to_dict())
+        self.assertEqual(parsed.target_text, "tv", msg=parsed.to_dict())
+
+    def test_was_there_any_tv_maps_to_monitor(self) -> None:
+        parsed = parse_object_query("Was there any TV?")
+        self.assertEqual(parsed.normalized_label, "monitor", msg=parsed.to_dict())
+        self.assertEqual(parsed.target_text, "tv", msg=parsed.to_dict())
+
 
 if __name__ == "__main__":
     unittest.main()
