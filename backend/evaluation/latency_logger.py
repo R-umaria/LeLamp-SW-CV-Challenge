@@ -1,4 +1,4 @@
-"""CSV latency logger for Milestone 1 evaluation."""
+"""CSV latency logger for Milestone 1.5 evaluation."""
 
 from __future__ import annotations
 
@@ -10,15 +10,30 @@ from typing import Mapping
 class LatencyLogger:
     FIELDNAMES = [
         "timestamp",
+        "frame_index",
         "capture_ms",
         "engagement_detection_ms",
+        "smoothing_ms",
         "state_machine_ms",
         "command_build_ms",
         "total_loop_ms",
+        "fps",
         "state",
-        "engagement_status",
-        "engagement_confidence",
-        "engagement_reason",
+        "state_elapsed_s",
+        "raw_engagement_status",
+        "raw_engagement_confidence",
+        "raw_engagement_reason",
+        "smoothed_engagement_status",
+        "smoothed_engagement_confidence",
+        "smoothed_engagement_reason",
+        "face_bbox",
+        "face_area_ratio",
+        "raw_face_count",
+        "candidate_count",
+        "selected_face_score",
+        "consecutive_engaged",
+        "consecutive_disengaged",
+        "consecutive_absent",
     ]
 
     def __init__(self, path: str | Path) -> None:

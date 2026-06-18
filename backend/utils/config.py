@@ -1,7 +1,8 @@
-"""Configuration defaults for Milestone 1.
+"""Configuration defaults for the LeLamp backend vertical slice.
 
-Keep these values explicit and conservative so the engagement loop is easy to tune
-while testing with a real webcam.
+Milestone 1.5 keeps the system dependency-light and deterministic, but adds the
+stability controls needed for dark-room webcam testing: candidate filtering,
+primary-face continuity, temporal smoothing, hysteresis, and state dwell time.
 """
 
 from __future__ import annotations
@@ -18,22 +19,69 @@ class CameraConfig:
 
 @dataclass(frozen=True)
 class EngagementConfig:
-    # Face center must remain roughly near the camera/lamp center to count as engaged.
-    center_tolerance_x: float = 0.22
-    center_tolerance_y: float = 0.28
-    min_face_area_ratio: float = 0.015
-    cascade_scale_factor: float = 1.1
-    cascade_min_neighbors: int = 5
-    cascade_min_size: tuple[int, int] = (60, 60)
+    # Engagement geometry. A face must be central and large enough to count as engaged.
+    center_tolerance_x: float = 0.24
+    center_tolerance_y: float = 0.30
+    min_face_area_ratio: float = 0.020
+
+    # Candidate filtering. This rejects many tiny false positives such as faces in
+    # posters/photo frames while keeping a near-desk user detectable.
+    min_candidate_area_ratio: float = 0.010
+    max_candidate_area_ratio: float = 0.60
+
+    # OpenCV Haar cascade settings. Higher min_neighbors reduces false positives
+    # in low light at the cost of missing some weak faces.
+    cascade_scale_factor: float = 1.08
+    cascade_min_neighbors: int = 6
+    cascade_min_size: tuple[int, int] = (64, 64)
+
+    # Dark-room preprocessing.
+    use_clahe: bool = True
+    clahe_clip_limit: float = 2.0
+    clahe_tile_grid_size: tuple[int, int] = (8, 8)
+    blur_kernel_size: int = 3
+
+    # Primary-face tracking. The detector scores candidates by continuity, size,
+    # and center proximity instead of blindly picking the largest face every frame.
+    primary_continuity_weight: float = 0.45
+    primary_size_weight: float = 0.35
+    primary_center_weight: float = 0.20
+    max_primary_center_distance: float = 0.35
+    max_primary_area_change_ratio: float = 2.75
+
+
+@dataclass(frozen=True)
+class SmoothingConfig:
+    # Sliding window over raw frame-level predictions.
+    window_size: int = 7
+    engaged_vote_ratio: float = 0.55
+    disengaged_vote_ratio: float = 0.60
+    absent_vote_ratio: float = 0.75
+
+    # Used by the FSM for fast but safe recovery when the user clearly returns.
+    clear_engaged_confidence: float = 0.78
 
 
 @dataclass(frozen=True)
 class StateMachineConfig:
-    # A centered face can transition immediately to engaged.
-    # A non-centered face must persist before seeking attention.
+    # A user must remain disengaged before attention seeking begins.
     seek_attention_after_s: float = 5.0
-    # If the face disappears briefly after engagement, treat it as disengagement first.
-    absent_grace_s: float = 2.0
+
+    # State changes are suppressed until the current state has lasted this long,
+    # except for clear engaged recovery.
+    min_state_dwell_s: float = 0.75
+
+    # Hysteresis: engaged -> disengaged/idle requires several consecutive smoothed
+    # predictions rather than one noisy frame.
+    exit_engaged_disengaged_frames: int = 5
+    exit_engaged_absent_frames: int = 8
+
+    # Recovery is deliberately quicker than disengagement so the lamp feels responsive.
+    engaged_recovery_frames: int = 2
+    clear_engaged_confidence: float = 0.78
+
+    # No-face behavior after active states.
+    absent_to_idle_frames: int = 12
 
 
 @dataclass(frozen=True)
@@ -47,6 +95,7 @@ class RuntimeConfig:
 class AppConfig:
     camera: CameraConfig = CameraConfig()
     engagement: EngagementConfig = EngagementConfig()
+    smoothing: SmoothingConfig = SmoothingConfig()
     state_machine: StateMachineConfig = StateMachineConfig()
     runtime: RuntimeConfig = RuntimeConfig()
 

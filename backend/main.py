@@ -1,10 +1,11 @@
-"""Milestone 1 backend vertical slice.
+"""Milestone 1.5 stabilized backend vertical slice.
 
 Run from the project root with:
     python -m backend.main --show-window
 
-This opens the webcam, estimates engagement from face presence/position, updates a
-finite state machine, emits protocol-shaped JSON commands, and logs latency.
+This opens the webcam, estimates engagement from face presence/position, smooths
+noisy frame-level predictions, updates a hysteresis-based finite state machine,
+emits protocol-shaped JSON commands, and logs latency/debug fields.
 """
 
 from __future__ import annotations
@@ -26,20 +27,39 @@ from backend.behavior.state_machine import InteractionStateMachine
 from backend.evaluation.latency_logger import LatencyLogger
 from backend.perception.camera import OpenCVCamera
 from backend.perception.engagement_detector import FaceEngagementDetector, draw_engagement_overlay
-from backend.utils.config import CameraConfig, EngagementConfig, RuntimeConfig, StateMachineConfig
+from backend.perception.temporal_smoother import EngagementSmoother
+from backend.utils.config import (
+    CameraConfig,
+    EngagementConfig,
+    RuntimeConfig,
+    SmoothingConfig,
+    StateMachineConfig,
+)
 from backend.utils.logging_utils import setup_logging
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="LeLamp Milestone 1 backend")
+    parser = argparse.ArgumentParser(description="LeLamp Milestone 1.5 stabilized backend")
     parser.add_argument("--camera-index", type=int, default=0)
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument("--seek-after", type=float, default=5.0)
-    parser.add_argument("--absent-grace", type=float, default=2.0)
     parser.add_argument("--emit-interval", type=float, default=1.0)
     parser.add_argument("--log-dir", type=str, default="logs")
     parser.add_argument("--max-frames", type=int, default=0, help="0 means run until q/Esc/Ctrl-C")
+
+    parser.add_argument("--smoothing-window", type=int, default=7)
+    parser.add_argument("--min-state-dwell", type=float, default=0.75)
+    parser.add_argument("--exit-disengaged-frames", type=int, default=5)
+    parser.add_argument("--exit-absent-frames", type=int, default=8)
+    parser.add_argument("--engaged-recovery-frames", type=int, default=2)
+    parser.add_argument("--clear-engaged-confidence", type=float, default=0.78)
+
+    parser.add_argument("--center-tolerance-x", type=float, default=0.24)
+    parser.add_argument("--center-tolerance-y", type=float, default=0.30)
+    parser.add_argument("--min-face-area-ratio", type=float, default=0.020)
+    parser.add_argument("--min-candidate-area-ratio", type=float, default=0.010)
+    parser.add_argument("--cascade-min-neighbors", type=int, default=6)
 
     window_group = parser.add_mutually_exclusive_group()
     window_group.add_argument("--show-window", action="store_true", default=True)
@@ -53,33 +73,64 @@ def append_jsonl(path: Path, payload: dict) -> None:
         f.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
-def main() -> int:
-    args = parse_args()
+def build_configs(args: argparse.Namespace) -> tuple[CameraConfig, EngagementConfig, SmoothingConfig, StateMachineConfig, RuntimeConfig]:
+    camera_config = CameraConfig(index=args.camera_index, width=args.width, height=args.height)
+    engagement_config = EngagementConfig(
+        center_tolerance_x=args.center_tolerance_x,
+        center_tolerance_y=args.center_tolerance_y,
+        min_face_area_ratio=args.min_face_area_ratio,
+        min_candidate_area_ratio=args.min_candidate_area_ratio,
+        cascade_min_neighbors=args.cascade_min_neighbors,
+    )
+    smoothing_config = SmoothingConfig(
+        window_size=args.smoothing_window,
+        clear_engaged_confidence=args.clear_engaged_confidence,
+    )
+    state_config = StateMachineConfig(
+        seek_attention_after_s=args.seek_after,
+        min_state_dwell_s=args.min_state_dwell,
+        exit_engaged_disengaged_frames=args.exit_disengaged_frames,
+        exit_engaged_absent_frames=args.exit_absent_frames,
+        engaged_recovery_frames=args.engaged_recovery_frames,
+        clear_engaged_confidence=args.clear_engaged_confidence,
+    )
     runtime_config = RuntimeConfig(
         command_emit_interval_s=args.emit_interval,
         log_dir=args.log_dir,
         show_window=args.show_window,
     )
-    camera_config = CameraConfig(index=args.camera_index, width=args.width, height=args.height)
-    state_config = StateMachineConfig(
-        seek_attention_after_s=args.seek_after,
-        absent_grace_s=args.absent_grace,
-    )
+    return camera_config, engagement_config, smoothing_config, state_config, runtime_config
+
+
+def main() -> int:
+    args = parse_args()
+    camera_config, engagement_config, smoothing_config, state_config, runtime_config = build_configs(args)
 
     logger = setup_logging(runtime_config.log_dir)
     latency_logger = LatencyLogger(Path(runtime_config.log_dir) / "latency.csv")
     commands_path = Path(runtime_config.log_dir) / "commands.jsonl"
 
     camera = OpenCVCamera(camera_config.index, camera_config.width, camera_config.height)
-    detector = FaceEngagementDetector(EngagementConfig())
+    detector = FaceEngagementDetector(engagement_config)
+    smoother = EngagementSmoother(smoothing_config)
     fsm = InteractionStateMachine(state_config)
 
-    logger.info("Starting Milestone 1 backend")
+    logger.info("Starting Milestone 1.5 stabilized backend")
     logger.info("Camera index=%s size=%sx%s", camera_config.index, camera_config.width, camera_config.height)
+    logger.info(
+        "Stability config smoothing_window=%s min_dwell=%.2fs exit_disengaged_frames=%s exit_absent_frames=%s min_face_area=%.3f min_candidate_area=%.3f",
+        smoothing_config.window_size,
+        state_config.min_state_dwell_s,
+        state_config.exit_engaged_disengaged_frames,
+        state_config.exit_engaged_absent_frames,
+        engagement_config.min_face_area_ratio,
+        engagement_config.min_candidate_area_ratio,
+    )
     logger.info("Commands will be saved to %s", commands_path)
 
     frame_count = 0
     last_emit_at = 0.0
+    fps_ema = 0.0
 
     try:
         camera.open()
@@ -90,24 +141,31 @@ def main() -> int:
             frame = camera_frame.frame
 
             t0 = time.perf_counter()
-            engagement = detector.detect(frame)
+            raw_engagement = detector.detect(frame)
             engagement_ms = (time.perf_counter() - t0) * 1000.0
 
             t0 = time.perf_counter()
-            transition = fsm.update(engagement)
+            smoothed_engagement = smoother.update(raw_engagement)
+            smoothing_ms = (time.perf_counter() - t0) * 1000.0
+
+            t0 = time.perf_counter()
+            transition = fsm.update(smoothed_engagement)
             state_machine_ms = (time.perf_counter() - t0) * 1000.0
 
             t0 = time.perf_counter()
             behavior = behavior_for_state(transition.current_state)
             command = build_behavior_command(
                 state=transition.current_state,
-                engagement=engagement,
+                engagement=smoothed_engagement,
                 behavior=behavior,
                 last_detected_objects=[],
             )
             command_ms = (time.perf_counter() - t0) * 1000.0
 
             total_ms = (time.perf_counter() - loop_start) * 1000.0
+            instantaneous_fps = 1000.0 / max(total_ms, 1e-6)
+            fps_ema = instantaneous_fps if fps_ema == 0.0 else (0.90 * fps_ema + 0.10 * instantaneous_fps)
+
             now = time.monotonic()
             should_emit = transition.changed or (now - last_emit_at >= runtime_config.command_emit_interval_s)
 
@@ -117,8 +175,8 @@ def main() -> int:
                     transition.previous_state.value,
                     transition.current_state.value,
                     transition.reason,
-                    engagement.status,
-                    engagement.confidence,
+                    smoothed_engagement.status,
+                    smoothed_engagement.confidence,
                 )
 
             if should_emit:
@@ -129,21 +187,44 @@ def main() -> int:
             latency_logger.append(
                 {
                     "timestamp": datetime.now().isoformat(timespec="milliseconds"),
+                    "frame_index": frame_count,
                     "capture_ms": round(camera_frame.capture_latency_ms, 3),
                     "engagement_detection_ms": round(engagement_ms, 3),
+                    "smoothing_ms": round(smoothing_ms, 3),
                     "state_machine_ms": round(state_machine_ms, 3),
                     "command_build_ms": round(command_ms, 3),
                     "total_loop_ms": round(total_ms, 3),
+                    "fps": round(fps_ema, 2),
                     "state": transition.current_state.value,
-                    "engagement_status": engagement.status,
-                    "engagement_confidence": round(engagement.confidence, 3),
-                    "engagement_reason": engagement.reason,
+                    "state_elapsed_s": round(transition.state_elapsed_s, 3),
+                    "raw_engagement_status": raw_engagement.status,
+                    "raw_engagement_confidence": round(raw_engagement.confidence, 3),
+                    "raw_engagement_reason": raw_engagement.reason,
+                    "smoothed_engagement_status": smoothed_engagement.status,
+                    "smoothed_engagement_confidence": round(smoothed_engagement.confidence, 3),
+                    "smoothed_engagement_reason": smoothed_engagement.reason,
+                    "face_bbox": smoothed_engagement.face_bbox or "",
+                    "face_area_ratio": round(smoothed_engagement.face_area_ratio, 4),
+                    "raw_face_count": raw_engagement.raw_face_count,
+                    "candidate_count": raw_engagement.candidate_count,
+                    "selected_face_score": round(smoothed_engagement.selected_face_score, 3),
+                    "consecutive_engaged": transition.consecutive_engaged,
+                    "consecutive_disengaged": transition.consecutive_disengaged,
+                    "consecutive_absent": transition.consecutive_absent,
                 }
             )
 
             if runtime_config.show_window:
-                draw_engagement_overlay(frame, engagement, transition.current_state.value)
-                cv2.imshow("LeLamp Milestone 1 - Engagement/FSM", frame)
+                draw_engagement_overlay(
+                    frame,
+                    raw_result=raw_engagement,
+                    smoothed_result=smoothed_engagement,
+                    state=transition.current_state.value,
+                    state_elapsed_s=transition.state_elapsed_s,
+                    fps=fps_ema,
+                    config=engagement_config,
+                )
+                cv2.imshow("LeLamp Milestone 1.5 - Stabilized Engagement/FSM", frame)
                 key = cv2.waitKey(1) & 0xFF
                 if key in (27, ord("q")):
                     logger.info("Quit requested from preview window")
@@ -163,7 +244,7 @@ def main() -> int:
         camera.release()
         if runtime_config.show_window:
             cv2.destroyAllWindows()
-        logger.info("Stopped Milestone 1 backend")
+        logger.info("Stopped Milestone 1.5 backend")
 
     return 0
 
