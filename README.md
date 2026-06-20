@@ -1,3 +1,22 @@
+# Lumos Current Patch — Hand Gestures + Motion Polish
+
+This version adds optional MediaPipe hand gesture control, wider face-follow stability, Pixar-style elbow-hump motion targets, and richer pre-sleep scanning.
+
+Recommended demo run:
+
+```powershell
+python -m backend.main --show-window --godot-udp --enable-gestures --enable-objects --enable-web-chat --preview-flip-horizontal
+```
+
+Gesture controls:
+
+- Index-finger beckon/call gesture: Lumos uses `gesture_approach` and shifts closer to the camera.
+- Open palm facing the camera: Lumos uses `gesture_retreat` and shifts away.
+
+See `docs/milestone4_6_hand_gesture_motion.md` for implementation details and tuning notes.
+
+---
+
 # Lumos Challenge - Milestone 1.5.1 Backend
 
 Vertical slice: webcam capture -> face-based engagement estimate -> temporal smoothing -> hysteresis finite state machine -> protocol-shaped JSON commands -> isolated run logs -> run-specific evaluation.

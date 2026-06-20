@@ -18,6 +18,7 @@ except ImportError as exc:  # pragma: no cover - dependency guard
     raise ImportError("OpenCV is required. Install with: pip install opencv-python") from exc
 
 from backend.perception.engagement_detector import EngagementResult, draw_engagement_overlay
+from backend.perception.gesture_detector import HandGestureResult, draw_hand_gesture_overlay
 from backend.perception.object_detector import ObjectDetection, draw_object_overlay
 from backend.utils.config import EngagementConfig
 
@@ -61,6 +62,7 @@ class PreviewWindow:
         engagement_config: EngagementConfig,
         object_detections: Iterable[ObjectDetection] | None = None,
         object_overlay_enabled: bool = False,
+        gesture_result: HandGestureResult | None = None,
     ) -> int:
         """Render a scaled preview and return the OpenCV key code.
 
@@ -72,6 +74,7 @@ class PreviewWindow:
         display_raw = raw_result
         display_smoothed = smoothed_result
         display_detections = list(object_detections or [])
+        display_gesture = gesture_result
 
         if self.config.flip_horizontal:
             display_frame = cv2.flip(display_frame, 1)
@@ -79,6 +82,7 @@ class PreviewWindow:
             display_raw = _mirror_engagement_result(raw_result, frame_width)
             display_smoothed = _mirror_engagement_result(smoothed_result, frame_width)
             display_detections = [_mirror_object_detection(item, frame_width) for item in display_detections]
+            display_gesture = _mirror_gesture_result(gesture_result, frame_width)
 
         draw_engagement_overlay(
             display_frame,
@@ -91,6 +95,7 @@ class PreviewWindow:
         )
         if object_overlay_enabled:
             draw_object_overlay(display_frame, display_detections)
+        draw_hand_gesture_overlay(display_frame, display_gesture)
 
         preview_frame = self._resize_for_preview(display_frame)
         preview_h, preview_w = preview_frame.shape[:2]
@@ -191,3 +196,13 @@ def _mirror_location_label(label: str) -> str:
     # Keep text labels readable when the displayed preview is flipped.
     temp = "__LUMOS_LEFT__"
     return label.replace("left", temp).replace("right", "left").replace(temp, "right")
+
+
+def _mirror_gesture_result(result: HandGestureResult | None, frame_width: int) -> HandGestureResult | None:
+    if result is None:
+        return None
+    return replace(
+        result,
+        hand_bbox=_mirror_bbox(result.hand_bbox, frame_width),
+        hand_center_norm=_mirror_center(result.hand_center_norm),
+    )

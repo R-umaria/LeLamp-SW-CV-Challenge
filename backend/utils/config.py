@@ -19,14 +19,15 @@ class CameraConfig:
 
 @dataclass(frozen=True)
 class EngagementConfig:
-    # Engagement geometry. A face must be central and large enough to count as engaged.
-    center_tolerance_x: float = 0.24
-    center_tolerance_y: float = 0.30
-    min_face_area_ratio: float = 0.020
+    # Wider geometry keeps Lumos following a visible user near the frame edge
+    # instead of immediately treating small head movement as disengagement.
+    center_tolerance_x: float = 0.36
+    center_tolerance_y: float = 0.34
+    min_face_area_ratio: float = 0.018
 
-    # Candidate filtering. This rejects many tiny false positives such as faces in
-    # posters/photo frames while keeping a near-desk user detectable.
-    min_candidate_area_ratio: float = 0.010
+    # Candidate filtering rejects tiny false positives while allowing a user who
+    # is slightly farther from the camera to stay trackable.
+    min_candidate_area_ratio: float = 0.006
     max_candidate_area_ratio: float = 0.60
 
     # OpenCV Haar cascade settings. Higher min_neighbors reduces false positives
@@ -52,14 +53,15 @@ class EngagementConfig:
 
 @dataclass(frozen=True)
 class SmoothingConfig:
-    # Sliding window over raw frame-level predictions.
-    window_size: int = 7
-    engaged_vote_ratio: float = 0.55
-    disengaged_vote_ratio: float = 0.60
-    absent_vote_ratio: float = 0.75
+    # Sliding window over raw frame-level predictions. Larger defaults reduce
+    # attention-seeking flicker when a face is briefly near the detection edge.
+    window_size: int = 9
+    engaged_vote_ratio: float = 0.50
+    disengaged_vote_ratio: float = 0.64
+    absent_vote_ratio: float = 0.80
 
     # Used by the FSM for fast but safe recovery when the user clearly returns.
-    clear_engaged_confidence: float = 0.78
+    clear_engaged_confidence: float = 0.72
 
 
 @dataclass(frozen=True)
@@ -69,19 +71,19 @@ class StateMachineConfig:
 
     # State changes are suppressed until the current state has lasted this long,
     # except for clear engaged recovery.
-    min_state_dwell_s: float = 0.75
+    min_state_dwell_s: float = 0.95
 
     # Hysteresis: engaged -> disengaged/idle requires several consecutive smoothed
-    # predictions rather than one noisy frame.
-    exit_engaged_disengaged_frames: int = 5
-    exit_engaged_absent_frames: int = 8
+    # predictions so edge-of-frame tracking does not trigger attention seeking.
+    exit_engaged_disengaged_frames: int = 9
+    exit_engaged_absent_frames: int = 12
 
     # Recovery is deliberately quicker than disengagement so the lamp feels responsive.
     engaged_recovery_frames: int = 2
-    clear_engaged_confidence: float = 0.78
+    clear_engaged_confidence: float = 0.72
 
     # No-face behavior after active states.
-    absent_to_idle_frames: int = 12
+    absent_to_idle_frames: int = 16
 
 
 @dataclass(frozen=True)
@@ -132,6 +134,30 @@ class ObjectDetectionConfig:
 
 
 @dataclass(frozen=True)
+class HandGestureConfig:
+    # Optional MediaPipe Hands path for deliberate gesture control.
+    enabled: bool = False
+    interval_s: float = 0.10
+    max_num_hands: int = 1
+    min_detection_confidence: float = 0.60
+    min_tracking_confidence: float = 0.55
+    min_gesture_confidence: float = 0.64
+    min_hand_area_ratio: float = 0.018
+    hold_s: float = 1.15
+
+    # Landmark heuristics. Y coordinates are normalized image coordinates where
+    # smaller values are higher in the frame.
+    finger_extension_margin: float = 0.030
+    finger_fold_margin: float = 0.005
+    index_prominence_margin: float = 0.050
+
+    # Temporal beckon detection: repeated index-tip movement within a short window.
+    motion_window_s: float = 1.20
+    beckon_motion_min_amplitude: float = 0.035
+    beckon_min_direction_changes: int = 2
+
+
+@dataclass(frozen=True)
 class MemoryConfig:
     db_path: str = "data/scene_memory.sqlite"
     dedupe_window_s: float = 8.0
@@ -148,6 +174,7 @@ class AppConfig:
     runtime: RuntimeConfig = RuntimeConfig()
     godot_udp: GodotUdpConfig = GodotUdpConfig()
     objects: ObjectDetectionConfig = ObjectDetectionConfig()
+    gestures: HandGestureConfig = HandGestureConfig()
     memory: MemoryConfig = MemoryConfig()
 
 

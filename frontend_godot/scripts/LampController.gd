@@ -4,10 +4,12 @@ const DEG: float = PI / 180.0
 const MotionSkillLibrary = preload("res://scripts/lumos/MotionSkillLibrary.gd")
 const LightSkillLibrary = preload("res://scripts/lumos/LightSkillLibrary.gd")
 
-@export var face_follow_max_degrees: float = 46.0
-@export var face_follow_smooth_speed: float = 2.10
-@export var motion_time_scale: float = 0.58
-@export var smooth_speed_scale: float = 0.84
+@export var face_follow_max_degrees: float = 68.0
+@export var face_follow_smooth_speed: float = 1.65
+@export var motion_time_scale: float = 0.48
+@export var smooth_speed_scale: float = 0.72
+@export var camera_approach_offset: Vector3 = Vector3(0.24, 0.0, -0.26)
+@export var root_shift_smooth_speed: float = 1.55
 
 @onready var base_yaw: Node3D = $BaseYaw_DOF1
 @onready var shoulder_pitch: Node3D = $BaseYaw_DOF1/ShoulderPitch_DOF2
@@ -32,33 +34,40 @@ var engagement_status: String = "absent"
 var engagement_confidence: float = 0.0
 var face_x_norm: float = -1.0
 var face_y_norm: float = -1.0
+var gesture_status: String = "none"
+var gesture_confidence: float = 0.0
 
 var _time: float = 0.0
 var _motion_started_at: float = 0.0
 var _smoothed_face_follow_deg: float = 0.0
+var _home_position: Vector3 = Vector3.ZERO
+var _target_root_position: Vector3 = Vector3.ZERO
 var _target: Dictionary = {
 	"base_yaw": 0.0,
 	"shoulder_pitch": -18.0 * DEG,
-	"elbow_pitch": 36.0 * DEG,
-	"wrist_pitch": -18.0 * DEG,
+	"elbow_pitch": -70.0 * DEG,
+	"wrist_pitch": 18.0 * DEG,
 	"wrist_yaw": 0.0,
 	"head_tilt": 0.0,
 }
 
 
 func _ready() -> void:
+	_home_position = position
+	_target_root_position = _home_position
 	_bind_runtime_materials()
 	apply_command({
 		"state": "idle",
 		"engagement": {"status": "absent", "confidence": 0.0},
+		"gesture": {"status": "none", "confidence": 0.0},
 		"behavior": {"motion": "idle_breathe", "light": "dim_warm", "sound": null, "speech_text": null},
 		"memory": {"last_detected_objects": []},
 	})
 
 
 func _bind_runtime_materials() -> void:
-	# The geometry is editor-authored in LampRig.tscn. Runtime code only binds
-	# mutable material instances for behavior-driven color/emission changes.
+	# Scene geometry is editor-authored in LampRig.tscn. Runtime code only binds
+	# mutable material instances for behavior-driven light and emission changes.
 	head_material = _make_material(Color(1.0, 0.86, 0.48), true)
 	cone_material = _make_transparent_material(Color(1.0, 0.82, 0.30, 0.18))
 
@@ -69,8 +78,6 @@ func _bind_runtime_materials() -> void:
 
 
 func apply_command(command: Dictionary) -> void:
-	# This remains a bounded renderer. It maps backend command fields to known
-	# skills and never performs perception, memory, or open-ended decision making.
 	current_state = str(command.get("state", current_state))
 
 	var behavior: Dictionary = _dictionary_value(command, "behavior")
@@ -89,11 +96,16 @@ func apply_command(command: Dictionary) -> void:
 	face_x_norm = _optional_norm_float(engagement, "face_x_norm", -1.0)
 	face_y_norm = _optional_norm_float(engagement, "face_y_norm", -1.0)
 
+	var gesture: Dictionary = _dictionary_value(command, "gesture")
+	gesture_status = str(gesture.get("status", gesture_status))
+	gesture_confidence = float(gesture.get("confidence", gesture_confidence))
+
 
 func _process(delta: float) -> void:
 	_time += delta
 	_update_face_follow(delta)
 	_update_motion_targets()
+	_update_root_shift(delta)
 	_smooth_to_targets(delta)
 	_update_light()
 
@@ -101,8 +113,6 @@ func _process(delta: float) -> void:
 func _update_face_follow(delta: float) -> void:
 	var desired_follow_deg: float = 0.0
 	if face_x_norm >= 0.0 and face_x_norm <= 1.0 and not MotionSkillLibrary.blocks_face_follow(current_motion):
-		# Camera-frame x=0 is user's left. Positive Godot yaw turns the lamp's
-		# local -Z/front direction left from the viewer's perspective.
 		desired_follow_deg = clampf((0.5 - face_x_norm) * face_follow_max_degrees * 2.0, -face_follow_max_degrees, face_follow_max_degrees)
 	var weight: float = clampf(delta * face_follow_smooth_speed, 0.0, 1.0)
 	_smoothed_face_follow_deg = lerpf(_smoothed_face_follow_deg, desired_follow_deg, weight)
@@ -115,16 +125,25 @@ func _update_motion_targets() -> void:
 	_set_target_from_degrees(target_degrees)
 
 
+func _update_root_shift(delta: float) -> void:
+	var scaled_time: float = _time * motion_time_scale
+	var motion_elapsed_s: float = maxf(0.0, _time - _motion_started_at)
+	var shift: float = MotionSkillLibrary.root_shift_for(current_motion, scaled_time, motion_elapsed_s)
+	_target_root_position = _home_position + camera_approach_offset * shift
+	var weight: float = clampf(delta * root_shift_smooth_speed, 0.0, 1.0)
+	position = position.lerp(_target_root_position, weight)
+
+
 func _set_target_from_degrees(target_degrees: PackedFloat32Array) -> void:
 	if target_degrees.size() < MotionSkillLibrary.TARGET_SIZE:
 		return
 	var follow_weight: float = clampf(target_degrees[6], 0.0, 1.0)
 	var follow_deg: float = _smoothed_face_follow_deg * follow_weight
-	_target["base_yaw"] = clampf(target_degrees[0] + follow_deg, -135.0, 135.0) * DEG
+	_target["base_yaw"] = clampf(target_degrees[0] + follow_deg, -150.0, 150.0) * DEG
 	_target["shoulder_pitch"] = clampf(target_degrees[1], -95.0, 95.0) * DEG
 	_target["elbow_pitch"] = clampf(target_degrees[2], -150.0, 115.0) * DEG
 	_target["wrist_pitch"] = clampf(target_degrees[3], -80.0, 80.0) * DEG
-	_target["wrist_yaw"] = clampf(target_degrees[4] + follow_deg * 0.42, -80.0, 80.0) * DEG
+	_target["wrist_yaw"] = clampf(target_degrees[4] + follow_deg * 0.44, -90.0, 90.0) * DEG
 	_target["head_tilt"] = clampf(target_degrees[5], -55.0, 35.0) * DEG
 
 
@@ -147,7 +166,6 @@ func _update_light() -> void:
 	var head_color: Color = Color(light_values[0], light_values[1], light_values[2])
 	var energy: float = light_values[3]
 
-	# Keep the physical SpotLight3D, emissive lamp head, shade, and visible cone synchronized.
 	if spot_light != null:
 		spot_light.light_energy = energy
 		spot_light.light_color = head_color

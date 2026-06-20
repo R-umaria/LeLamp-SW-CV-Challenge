@@ -1,4 +1,9 @@
-"""JSON command builder matching the backend/frontend protocol shape."""
+"""Backend-to-frontend command builder.
+
+The JSON shape stays bounded and deterministic: Python owns perception, state,
+behavior selection, memory, and recall; Godot only renders the named motion/light
+skills and optional display hints.
+"""
 
 from __future__ import annotations
 
@@ -14,8 +19,9 @@ def build_behavior_command(
     engagement: EngagementResult,
     behavior: Mapping,
     last_detected_objects: Optional[Iterable[Mapping]] = None,
+    gesture: Optional[Mapping] = None,
 ) -> dict:
-    return {
+    command = {
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "state": state.value,
         "engagement": engagement.to_protocol_dict(),
@@ -26,7 +32,9 @@ def build_behavior_command(
             "speech_text": behavior.get("speech_text"),
         },
         "memory": {
-            # This field is stable across Milestones 3-4 and is consumed by the Godot overlay.
             "last_detected_objects": list(last_detected_objects or []),
         },
     }
+    if gesture is not None:
+        command["gesture"] = dict(gesture)
+    return command

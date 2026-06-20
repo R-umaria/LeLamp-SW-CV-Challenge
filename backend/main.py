@@ -24,7 +24,7 @@ try:
 except ImportError as exc:  # pragma: no cover - dependency guard
     raise ImportError("OpenCV is required. Install with: pip install opencv-python") from exc
 
-from backend.behavior.behavior_policy import behavior_for_transition
+from backend.behavior.behavior_policy import behavior_for_transition, behavior_with_gesture_override
 from backend.behavior.command_protocol import build_behavior_command
 from backend.behavior.godot_udp_sender import GodotUdpSender
 from backend.behavior.state_machine import InteractionStateMachine, LampState
@@ -36,12 +36,14 @@ from backend.evaluation.latency_logger import LatencyLogger
 from backend.memory.scene_memory import SceneMemory
 from backend.perception.camera import OpenCVCamera
 from backend.perception.engagement_detector import FaceEngagementDetector
+from backend.perception.gesture_detector import HandGestureDetector, HandGestureResult
 from backend.perception.object_detector import YoloObjectDetector
 from backend.perception.temporal_smoother import EngagementSmoother
 from backend.utils.config import (
     CameraConfig,
     EngagementConfig,
     GodotUdpConfig,
+    HandGestureConfig,
     MemoryConfig,
     ObjectDetectionConfig,
     RuntimeConfig,
@@ -68,17 +70,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-latest", action="store_true", help="Do not mirror this run into logs/latest.")
     parser.add_argument("--max-frames", type=int, default=0, help="0 means run until q/Esc/Ctrl-C")
 
-    parser.add_argument("--smoothing-window", type=int, default=7)
-    parser.add_argument("--min-state-dwell", type=float, default=0.75)
-    parser.add_argument("--exit-disengaged-frames", type=int, default=5)
-    parser.add_argument("--exit-absent-frames", type=int, default=8)
+    parser.add_argument("--smoothing-window", type=int, default=9)
+    parser.add_argument("--min-state-dwell", type=float, default=0.95)
+    parser.add_argument("--exit-disengaged-frames", type=int, default=9)
+    parser.add_argument("--exit-absent-frames", type=int, default=12)
     parser.add_argument("--engaged-recovery-frames", type=int, default=2)
-    parser.add_argument("--clear-engaged-confidence", type=float, default=0.78)
+    parser.add_argument("--clear-engaged-confidence", type=float, default=0.72)
 
-    parser.add_argument("--center-tolerance-x", type=float, default=0.24)
-    parser.add_argument("--center-tolerance-y", type=float, default=0.30)
-    parser.add_argument("--min-face-area-ratio", type=float, default=0.020)
-    parser.add_argument("--min-candidate-area-ratio", type=float, default=0.010)
+    parser.add_argument("--center-tolerance-x", type=float, default=0.36)
+    parser.add_argument("--center-tolerance-y", type=float, default=0.34)
+    parser.add_argument("--min-face-area-ratio", type=float, default=0.018)
+    parser.add_argument("--min-candidate-area-ratio", type=float, default=0.006)
     parser.add_argument("--cascade-min-neighbors", type=int, default=6)
 
     parser.add_argument("--enable-objects", action="store_true", help="Enable optional YOLO object detection and scene-memory writes.")
@@ -89,6 +91,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--object-confidence", type=float, default=0.35, help="YOLO confidence threshold for object detection.")
     parser.add_argument("--memory-dedupe-window", type=float, default=8.0, help="Seconds to suppress repeated same-object/same-location memory writes.")
     parser.add_argument("--object-frame-dir", type=str, default="data/object_frames", help="Directory for saved object evidence frames.")
+
+    parser.add_argument("--enable-gestures", action="store_true", help="Enable MediaPipe hand gestures: index beckon moves Lumos closer; open palm moves it away.")
+    parser.add_argument("--gesture-interval", type=float, default=0.10, help="Seconds between hand-gesture detection passes.")
+    parser.add_argument("--gesture-confidence", type=float, default=0.64, help="Minimum gesture confidence required to override the normal motion skill.")
+    parser.add_argument("--gesture-hold", type=float, default=1.15, help="Seconds to hold the last gesture command after a brief hand landmark dropout.")
 
     parser.add_argument("--interactive-recall", action="store_true", help="Debug only: allow terminal recall questions while the backend is running.")
     parser.add_argument("--enable-godot-chat", action="store_true", help="Legacy/non-primary: listen for live chat queries from Godot over local UDP.")
@@ -214,6 +221,7 @@ def build_configs(
     RuntimeConfig,
     GodotUdpConfig,
     ObjectDetectionConfig,
+    HandGestureConfig,
     MemoryConfig,
 ]:
     camera_config = CameraConfig(index=args.camera_index, width=args.width, height=args.height)
@@ -252,6 +260,12 @@ def build_configs(
         interval_s=max(0.1, args.object_interval),
         confidence=args.object_confidence,
     )
+    gesture_config = HandGestureConfig(
+        enabled=args.enable_gestures,
+        interval_s=max(0.04, args.gesture_interval),
+        min_gesture_confidence=args.gesture_confidence,
+        hold_s=max(0.0, args.gesture_hold),
+    )
     memory_config = MemoryConfig(
         db_path=args.memory_db,
         dedupe_window_s=max(0.0, args.memory_dedupe_window),
@@ -266,6 +280,7 @@ def build_configs(
         runtime_config,
         godot_udp_config,
         object_config,
+        gesture_config,
         memory_config,
     )
 
@@ -280,6 +295,7 @@ def main() -> int:
         runtime_config,
         godot_udp_config,
         object_config,
+        gesture_config,
         memory_config,
     ) = build_configs(args)
 
@@ -306,6 +322,7 @@ def main() -> int:
     smoother = EngagementSmoother(smoothing_config)
     fsm = InteractionStateMachine(state_config)
     object_detector = YoloObjectDetector(object_config, logger=logger)
+    gesture_detector = HandGestureDetector(gesture_config, logger=logger)
     scene_memory = SceneMemory(memory_config, logger=logger)
     preview_window = PreviewWindow(
         PreviewWindowConfig(
@@ -422,6 +439,14 @@ def main() -> int:
         object_config.confidence,
     )
     logger.info(
+        "Gesture config enabled=%s active=%s interval=%.2fs confidence=%.2f hold=%.2fs",
+        gesture_config.enabled,
+        gesture_detector.enabled,
+        gesture_config.interval_s,
+        gesture_config.min_gesture_confidence,
+        gesture_config.hold_s,
+    )
+    logger.info(
         "Memory config db=%s save_frames=%s dedupe_window=%.1fs",
         memory_config.db_path,
         memory_config.save_object_frames,
@@ -452,6 +477,8 @@ def main() -> int:
     frame_count = 0
     last_emit_at = 0.0
     last_object_detection_at = 0.0
+    last_gesture_detection_at = 0.0
+    gesture_result = HandGestureResult("unavailable", 0.0, "gesture_detection_disabled")
     fps_ema = 0.0
     last_godot_udp_send_ms = None
     last_detected_objects: list[dict] = []
@@ -470,6 +497,7 @@ def main() -> int:
             engagement_ms = (time.perf_counter() - t0) * 1000.0
 
             object_detection_ms = ""
+            gesture_detection_ms = ""
             memory_write_ms = ""
             memory_retrieval_ms = ""
             llm_response_ms = ""
@@ -518,6 +546,23 @@ def main() -> int:
                     memory_result.memory_write_ms,
                 )
 
+            should_detect_gestures = gesture_config.enabled and (
+                last_gesture_detection_at == 0.0 or (now - last_gesture_detection_at >= gesture_config.interval_s)
+            )
+            if should_detect_gestures:
+                t0 = time.perf_counter()
+                gesture_result = gesture_detector.detect(frame, now=now)
+                gesture_detection_ms = round((time.perf_counter() - t0) * 1000.0, 3)
+                last_gesture_detection_at = now
+                if gesture_result.status in {"beckon", "palm_push"}:
+                    logger.info(
+                        "Detected gesture status=%s confidence=%.3f reason=%s latency_ms=%.3f",
+                        gesture_result.status,
+                        gesture_result.confidence,
+                        gesture_result.reason,
+                        gesture_detection_ms,
+                    )
+
             t0 = time.perf_counter()
             smoothed_engagement = smoother.update(raw_engagement)
             smoothing_ms = (time.perf_counter() - t0) * 1000.0
@@ -528,11 +573,14 @@ def main() -> int:
 
             t0 = time.perf_counter()
             behavior = behavior_for_transition(transition)
+            gesture_payload = gesture_result.to_protocol_dict()
+            behavior = behavior_with_gesture_override(behavior, gesture_payload)
             command = build_behavior_command(
                 state=transition.current_state,
                 engagement=smoothed_engagement,
                 behavior=behavior,
                 last_detected_objects=last_detected_objects,
+                gesture=gesture_payload,
             )
             command_ms = (time.perf_counter() - t0) * 1000.0
 
@@ -585,6 +633,7 @@ def main() -> int:
                             "speech_text": "Thinking...",
                         },
                         last_detected_objects=last_detected_objects,
+                        gesture=gesture_payload,
                     )
                     print(json.dumps(thinking_command, ensure_ascii=False), flush=True)
                     append_jsonl(command_paths, thinking_command)
@@ -630,6 +679,7 @@ def main() -> int:
                             "speech_text": str(answer_text),
                         },
                         last_detected_objects=last_detected_objects,
+                        gesture=gesture_payload,
                     )
                     print(json.dumps(final_recall_command, ensure_ascii=False), flush=True)
                     append_jsonl(command_paths, final_recall_command)
@@ -667,6 +717,7 @@ def main() -> int:
                             "speech_text": "Thinking...",
                         },
                         last_detected_objects=last_detected_objects,
+                        gesture=gesture_payload,
                     )
                 print(json.dumps(outgoing_command, ensure_ascii=False), flush=True)
                 append_jsonl(command_paths, outgoing_command)
@@ -680,6 +731,7 @@ def main() -> int:
                     "capture_ms": round(camera_frame.capture_latency_ms, 3),
                     "engagement_detection_ms": round(engagement_ms, 3),
                     "object_detection_ms": object_detection_ms,
+                    "gesture_detection_ms": gesture_detection_ms,
                     "memory_write_ms": memory_write_ms,
                     "memory_retrieval_ms": memory_retrieval_ms,
                     "llm_response_ms": llm_response_ms,
@@ -709,6 +761,9 @@ def main() -> int:
                     "candidate_count": raw_engagement.candidate_count,
                     "selected_face_score": round(smoothed_engagement.selected_face_score, 3),
                     "object_count": len(display_detections) if object_detector.enabled else 0,
+                    "gesture_status": gesture_result.status,
+                    "gesture_confidence": round(gesture_result.confidence, 3),
+                    "gesture_reason": gesture_result.reason,
                     "memory_write_count": memory_write_count,
                     "memory_duplicate_skip_count": memory_duplicate_skip_count,
                     "consecutive_engaged": transition.consecutive_engaged,
@@ -728,6 +783,7 @@ def main() -> int:
                     engagement_config=engagement_config,
                     object_detections=display_detections,
                     object_overlay_enabled=object_detector.enabled,
+                    gesture_result=gesture_result,
                 )
                 if key in (27, ord("q")):
                     logger.info("Quit requested from preview window")
@@ -751,6 +807,7 @@ def main() -> int:
             recall_worker.stop()
         if web_chat_server is not None:
             web_chat_server.stop()
+        gesture_detector.close()
         godot_sender.close()
         camera.release()
         if runtime_config.show_window:

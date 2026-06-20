@@ -1,10 +1,13 @@
-"""Bounded mapping from interaction state transitions to expressive Lumos behavior.
+"""Bounded mapping from perception/state to expressive Lumos behavior.
 
-The backend still owns behavior selection. The Godot frontend only renders the
-named motion/light skills it receives through the stable command protocol.
+The backend selects named skills; Godot only renders those skills. This keeps the
+real-time behavior deterministic and prevents the LLM or frontend from directly
+controlling motion.
 """
 
 from __future__ import annotations
+
+from typing import Mapping
 
 from backend.behavior.state_machine import LampState, StateTransition
 
@@ -50,18 +53,12 @@ def behavior_for_state(state: LampState) -> dict:
 
 
 def behavior_for_transition(transition: StateTransition) -> dict:
-    """Return an expressive behavior using only bounded state-transition context.
-
-    This adds personality without letting an LLM or the frontend make autonomous
-    motion decisions. Timing windows are deliberately simple and explainable.
-    """
+    """Return the default expressive behavior for the current FSM state."""
 
     state = transition.current_state
     behavior = behavior_for_state(state)
 
     if state == LampState.ENGAGED:
-        # Eye contact moment: Lumos briefly stands taller and turns pink, then
-        # falls back to calm attentive following after the first few seconds.
         if transition.changed or transition.state_elapsed_s < 2.6:
             behavior.update(
                 {
@@ -74,9 +71,7 @@ def behavior_for_transition(transition: StateTransition) -> dict:
         return behavior
 
     if state == LampState.IDLE:
-        # When no one is present, do a slow room check before returning to the
-        # user-authored sleep pose. This keeps the demo expressive but bounded.
-        if transition.state_elapsed_s < 4.2:
+        if transition.state_elapsed_s < 6.4:
             behavior.update(
                 {
                     "motion": "sleepy_search_then_rest",
@@ -107,4 +102,42 @@ def behavior_for_transition(transition: StateTransition) -> dict:
         )
         return behavior
 
+    return behavior
+
+
+def behavior_with_gesture_override(base_behavior: Mapping, gesture: Mapping | None) -> dict:
+    """Overlay deliberate hand-gesture control on top of normal behavior.
+
+    Gesture override is intentionally narrow: a beckon gesture maps to one known
+    approach skill, and an open palm maps to one known retreat skill. Memory,
+    recall, and engagement state remain owned by the backend pipeline.
+    """
+
+    behavior = dict(base_behavior)
+    if not gesture:
+        return behavior
+
+    status = str(gesture.get("status", "none"))
+    confidence = float(gesture.get("confidence", 0.0) or 0.0)
+    if confidence < 0.64:
+        return behavior
+
+    if status == "beckon":
+        behavior.update(
+            {
+                "motion": "gesture_approach",
+                "light": "happy_gold",
+                "sound": None,
+                "speech_text": None,
+            }
+        )
+    elif status == "palm_push":
+        behavior.update(
+            {
+                "motion": "gesture_retreat",
+                "light": "soft_pulse",
+                "sound": None,
+                "speech_text": None,
+            }
+        )
     return behavior
