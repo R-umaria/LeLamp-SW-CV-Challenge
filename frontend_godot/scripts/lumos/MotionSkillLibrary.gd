@@ -74,9 +74,9 @@ static func smooth_speed_for(motion: String) -> float:
 		"sleep_rest":
 			return 1.35
 		"sleepy_search_then_rest":
-			return 1.75
+			return 0.95
 		"excited_greeting":
-			return 3.35
+			return 2.35
 		"attentive_follow":
 			return 2.45
 		"thinking_slow":
@@ -122,18 +122,18 @@ static func _sleep_rest(_t: float) -> PackedFloat32Array:
 static func _sleepy_search_then_rest(t: float, elapsed_s: float) -> PackedFloat32Array:
 	# Before sleeping, Lumos slowly checks the room as if waiting for someone.
 	# The skill then converges into the exact sleep_rest pose.
-	if elapsed_s < 3.6:
+	if elapsed_s < 4.0:
 		var fade: float = clampf(1.0 - (elapsed_s / 3.6), 0.0, 1.0)
-		var scan: float = sin(t * 1.15) * fade
-		var lift: float = sin(t * 0.85) * fade
-		return _target(-28.0 * scan, 10.0 + 8.0 * lift, -34.0 - 8.0 * lift, -8.0, 20.0 * scan, -10.0 + 4.0 * lift, 0.0)
+		var scan: float = sin(t * 4.15) * fade
+		var lift: float = sin(t * 2.85) * fade
+		return _target(-160.0 * scan, 10.0 + 8.0 * lift, -34.0 - 8.0 * lift, -8.0, 60.0 * scan, -10.0 + 4.0 * lift, 0.0)
 	return _sleep_rest(t)
 
 
 static func _idle_breathe(t: float) -> PackedFloat32Array:
 	var breathe: float = sin(t * 0.62)
 	var sway: float = sin(t * 0.34)
-	return _target(1.7 * sway, -18.0 + 1.0 * breathe, 37.0 + 0.8 * breathe, -19.0 + 1.1 * sin(t * 0.70), 1.2 * sway, 1.0 * sin(t * 0.52), 0.42)
+	return _target(-3 * sway, 20.0 + 9 * breathe, -40.0 + 0.8 * breathe, 10.0 + 1.1 * sin(t * 0.70), 1.2 * sway, 1.0 * sin(t * 0.52), 0.42)
 
 
 static func _excited_greeting(t: float, elapsed_s: float) -> PackedFloat32Array:
