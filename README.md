@@ -234,3 +234,19 @@ Fail if:
 - The backend command JSON shape changes.
 - Command logging breaks.
 - The frontend requires object detection, memory, LLM, IK, or imported models to run.
+
+## Milestone 4.5 preview-window controls
+
+The Python OpenCV preview window is now smaller by default and handled through `backend/utils/preview_window.py`. The preview is display-only, so resizing or flipping it does not change engagement detection, object memory, or Godot face-follow commands.
+
+Common commands:
+
+```bash
+python -m backend.main --godot-udp --enable-web-chat --show-window --preview-scale 0.50
+python -m backend.main --godot-udp --enable-web-chat --show-window --preview-scale 0.35
+python -m backend.main --godot-udp --enable-web-chat --show-window --preview-width 320 --preview-height 240
+python -m backend.main --godot-udp --enable-web-chat --show-window --preview-flip-horizontal
+python -m backend.main --godot-udp --enable-web-chat --no-window
+```
+
+For a true single-window future version, stream Python's processed preview into Godot instead of letting Godot open the webcam directly. Python should remain the perception owner for the challenge demo.

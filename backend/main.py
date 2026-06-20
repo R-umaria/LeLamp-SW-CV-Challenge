@@ -35,8 +35,8 @@ from backend.conversation.web_chat_server import WebChatRequest, WebChatServer
 from backend.evaluation.latency_logger import LatencyLogger
 from backend.memory.scene_memory import SceneMemory
 from backend.perception.camera import OpenCVCamera
-from backend.perception.engagement_detector import FaceEngagementDetector, draw_engagement_overlay
-from backend.perception.object_detector import YoloObjectDetector, draw_object_overlay
+from backend.perception.engagement_detector import FaceEngagementDetector
+from backend.perception.object_detector import YoloObjectDetector
 from backend.perception.temporal_smoother import EngagementSmoother
 from backend.utils.config import (
     CameraConfig,
@@ -49,6 +49,7 @@ from backend.utils.config import (
     StateMachineConfig,
 )
 from backend.utils.logging_utils import setup_logging
+from backend.utils.preview_window import PreviewWindow, PreviewWindowConfig
 from backend.utils.run_paths import create_run_paths, write_latest_pointer
 
 
@@ -109,6 +110,12 @@ def parse_args() -> argparse.Namespace:
     window_group = parser.add_mutually_exclusive_group()
     window_group.add_argument("--show-window", action="store_true", default=True)
     window_group.add_argument("--no-window", action="store_false", dest="show_window")
+    parser.add_argument("--preview-scale", type=float, default=0.50, help="Scale factor for the OpenCV preview window when --show-window is enabled. Default 0.50 gives about 320x240 for a 640x480 camera.")
+    parser.add_argument("--preview-width", type=int, default=0, help="Optional exact preview width in pixels. If set without --preview-height, aspect ratio is preserved.")
+    parser.add_argument("--preview-height", type=int, default=0, help="Optional exact preview height in pixels. If set without --preview-width, aspect ratio is preserved.")
+    parser.add_argument("--preview-x", type=int, default=24, help="Initial screen x-position for the OpenCV preview window.")
+    parser.add_argument("--preview-y", type=int, default=24, help="Initial screen y-position for the OpenCV preview window.")
+    parser.add_argument("--preview-flip-horizontal", action="store_true", help="Flip only the displayed preview horizontally. This fixes a mirrored/reversed preview without changing perception, memory, or Godot face-follow coordinates.")
     return parser.parse_args()
 
 
@@ -300,6 +307,18 @@ def main() -> int:
     fsm = InteractionStateMachine(state_config)
     object_detector = YoloObjectDetector(object_config, logger=logger)
     scene_memory = SceneMemory(memory_config, logger=logger)
+    preview_window = PreviewWindow(
+        PreviewWindowConfig(
+            title="Lumos - CV Preview",
+            scale=args.preview_scale,
+            width=args.preview_width,
+            height=args.preview_height,
+            x=args.preview_x,
+            y=args.preview_y,
+            flip_horizontal=args.preview_flip_horizontal,
+        ),
+        logger=logger,
+    )
 
     llm_timeout = float(args.ollama_timeout) if args.ollama_timeout is not None else float(args.llm_timeout)
 
@@ -375,6 +394,16 @@ def main() -> int:
     if not args.no_latest:
         logger.info("Latest mirror directory=%s", run_paths.latest_dir)
     logger.info("Camera index=%s size=%sx%s", camera_config.index, camera_config.width, camera_config.height)
+    if runtime_config.show_window:
+        logger.info(
+            "Preview config scale=%.2f width=%s height=%s position=(%s,%s) flip_horizontal=%s",
+            args.preview_scale,
+            args.preview_width,
+            args.preview_height,
+            args.preview_x,
+            args.preview_y,
+            args.preview_flip_horizontal,
+        )
     logger.info(
         "Stability config smoothing_window=%s min_dwell=%.2fs exit_disengaged_frames=%s exit_absent_frames=%s min_face_area=%.3f min_candidate_area=%.3f",
         smoothing_config.window_size,
@@ -689,19 +718,17 @@ def main() -> int:
             )
 
             if runtime_config.show_window:
-                draw_engagement_overlay(
+                key = preview_window.show(
                     frame,
                     raw_result=raw_engagement,
                     smoothed_result=smoothed_engagement,
                     state=transition.current_state.value,
                     state_elapsed_s=transition.state_elapsed_s,
                     fps=fps_ema,
-                    config=engagement_config,
+                    engagement_config=engagement_config,
+                    object_detections=display_detections,
+                    object_overlay_enabled=object_detector.enabled,
                 )
-                if object_detector.enabled:
-                    draw_object_overlay(frame, display_detections)
-                cv2.imshow("Lumos - Engagement/Object Memory/Browser Recall", frame)
-                key = cv2.waitKey(1) & 0xFF
                 if key in (27, ord("q")):
                     logger.info("Quit requested from preview window")
                     break
@@ -727,6 +754,7 @@ def main() -> int:
         godot_sender.close()
         camera.release()
         if runtime_config.show_window:
+            preview_window.close()
             cv2.destroyAllWindows()
         logger.info("Stopped Lumos backend")
 
