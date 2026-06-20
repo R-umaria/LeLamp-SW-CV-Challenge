@@ -10,7 +10,7 @@ Use Godot 4.6.3 stable or newer Godot 4.x stable. The project uses basic Godot 4
 
 ## Milestone 4.3.3 expressive polish
 
-Milestone 4.3.3 keeps Godot as a bounded animation/display layer while making the demo read more like the reference image: a large wooden desk dominates the foreground, a wide horizontal window fills the back wall, and a smaller robotic lamp sits on the tabletop in front of the window. The camera is now placed near the right/front table corner, looking diagonally across the desk. The lamp head and visible light cone still point along the rig's local `-Z` axis, and the whole lamp rig is only scaled/rotated as a display object.
+Milestone 4.3.3 keeps Godot as a bounded animation/display layer while making the demo read more like the reference image: a large plain wooden desk dominates the foreground, a wide horizontal window fills the back wall, and the robotic lamp sits on the tabletop in front of the window. This patch increases the lamp scale for demo readability, raises/widens the procedural room shell, and removes the procedural tabletop grain strips so the desk appears plain. The camera remains near the right/front table corner, looking diagonally across the desk. The lamp head and visible light cone still point along the rig's local `-Z` axis, and the whole lamp rig is only scaled/rotated as a display object.
 
 The 6-DOF animation axes are unchanged. The polish is procedural motion, camera placement, lighting, and simple primitive scene geometry. No imported model, voice input, perception logic, memory logic, or new AI dependency was added to Godot.
 

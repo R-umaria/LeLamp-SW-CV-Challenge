@@ -2,9 +2,9 @@ extends Node3D
 
 @export var response_visible_seconds: float = 8.0
 @export var backend_stale_timeout_seconds: float = 60.0
-@export var camera_position: Vector3 = Vector3(3.05, 1.18, -2.85)
-@export var camera_target: Vector3 = Vector3(-0.28, 0.68, 0.15)
-@export var camera_fov_degrees: float = 54.0
+@export var camera_position: Vector3 = Vector3(3.35, 1.38, -3.15)
+@export var camera_target: Vector3 = Vector3(-0.24, 0.92, 0.12)
+@export var camera_fov_degrees: float = 52.0
 
 @onready var udp_receiver: Node = $UdpCommandReceiver
 @onready var lamp: Node3D = $LampRig
@@ -48,10 +48,10 @@ func _process(_delta: float) -> void:
 
 
 func _setup_camera_lamp_and_light() -> void:
-	# Scene composition follows the reference image: the lamp is small on a large
-	# desk, with its local -Z/front side aimed toward a front-right camera.
+	# Scene composition keeps the lamp on the tabletop in front of the window,
+	# but scales it up so it reads clearly as the demo's main embodied agent.
 	lamp.position = Vector3(-0.28, 0.0, 0.08)
-	lamp.scale = Vector3(0.58, 0.58, 0.58)
+	lamp.scale = Vector3(0.82, 0.82, 0.82)
 	lamp.rotation_degrees = Vector3(0.0, -34.0, 0.0)
 
 	camera.position = camera_position
@@ -59,8 +59,8 @@ func _setup_camera_lamp_and_light() -> void:
 	camera.fov = camera_fov_degrees
 	camera.current = true
 
-	# Soft daylight comes from the window side. The fill light keeps the arm joints
-	# readable without making the room look like a debug scene.
+	# Soft daylight comes from the window side. The fill light keeps the enlarged
+	# lamp readable without flattening the taller room.
 	sun.rotation_degrees = Vector3(-42.0, -18.0, 0.0)
 	sun.light_energy = 1.18
 	sun.shadow_enabled = true
@@ -86,9 +86,9 @@ func _build_scene_environment() -> void:
 	var dark_frame_material: StandardMaterial3D = _make_env_material(Color(0.16, 0.17, 0.16), 0.42)
 	var sky_material: StandardMaterial3D = _make_env_material(Color(0.70, 0.84, 0.98), 0.95)
 	var glass_material: StandardMaterial3D = _make_translucent_env_material(Color(0.74, 0.88, 1.0, 0.30), 0.18)
-	var wood_material: StandardMaterial3D = _make_env_material(Color(0.70, 0.52, 0.34), 0.47)
-	var wood_dark_material: StandardMaterial3D = _make_env_material(Color(0.47, 0.33, 0.20), 0.55)
-	var wood_light_material: StandardMaterial3D = _make_env_material(Color(0.78, 0.61, 0.41), 0.50)
+	var wood_material: StandardMaterial3D = _make_env_material(Color(0.66, 0.49, 0.32), 0.58)
+	var wood_dark_material: StandardMaterial3D = _make_env_material(Color(0.50, 0.36, 0.23), 0.60)
+	var wood_light_material: StandardMaterial3D = _make_env_material(Color(0.66, 0.49, 0.32), 0.58)
 	var building_material: StandardMaterial3D = _make_env_material(Color(0.66, 0.69, 0.70), 0.75)
 	var distant_building_material: StandardMaterial3D = _make_env_material(Color(0.78, 0.80, 0.80), 0.80)
 	var tree_material: StandardMaterial3D = _make_env_material(Color(0.38, 0.58, 0.32), 0.82)
@@ -104,18 +104,20 @@ func _build_scene_environment() -> void:
 
 
 func _build_room_shell(root: Node3D, wall_material: Material, ceiling_material: Material, floor_material: Material, trim_material: Material) -> void:
-	root.add_child(_box_mesh("BackWall", Vector3(6.8, 3.1, 0.10), Vector3(0.0, 1.02, 1.42), wall_material))
-	root.add_child(_box_mesh("LeftWall", Vector3(0.10, 3.1, 3.45), Vector3(-3.35, 1.02, -0.25), wall_material))
-	root.add_child(_box_mesh("Ceiling", Vector3(6.9, 0.08, 3.55), Vector3(0.0, 2.60, -0.25), ceiling_material))
-	root.add_child(_box_mesh("Floor", Vector3(6.9, 0.08, 3.55), Vector3(0.0, -0.62, -0.25), floor_material))
-	root.add_child(_box_mesh("BackBaseboard", Vector3(6.75, 0.08, 0.08), Vector3(0.0, -0.18, 1.34), trim_material))
-	root.add_child(_box_mesh("LeftBaseboard", Vector3(0.09, 0.08, 3.45), Vector3(-3.29, -0.18, -0.25), trim_material))
-	root.add_child(_box_mesh("LeftBackCornerTrim", Vector3(0.08, 3.05, 0.08), Vector3(-3.29, 1.02, 1.34), trim_material))
+	# Taller and wider shell: the lamp no longer feels squeezed under a low ceiling.
+	root.add_child(_box_mesh("BackWall", Vector3(8.6, 4.25, 0.10), Vector3(0.0, 1.52, 1.58), wall_material))
+	root.add_child(_box_mesh("LeftWall", Vector3(0.10, 4.25, 4.65), Vector3(-4.25, 1.52, -0.42), wall_material))
+	root.add_child(_box_mesh("Ceiling", Vector3(8.7, 0.08, 4.75), Vector3(0.0, 3.68, -0.42), ceiling_material))
+	root.add_child(_box_mesh("Floor", Vector3(8.7, 0.08, 4.75), Vector3(0.0, -0.62, -0.42), floor_material))
+	root.add_child(_box_mesh("BackBaseboard", Vector3(8.55, 0.08, 0.08), Vector3(0.0, -0.18, 1.50), trim_material))
+	root.add_child(_box_mesh("LeftBaseboard", Vector3(0.09, 0.08, 4.65), Vector3(-4.19, -0.18, -0.42), trim_material))
+	root.add_child(_box_mesh("LeftBackCornerTrim", Vector3(0.08, 4.15, 0.08), Vector3(-4.19, 1.52, 1.50), trim_material))
 
 
 func _build_reference_desk(root: Node3D, wood_material: Material, wood_dark_material: Material, wood_light_material: Material, handle_material: Material) -> void:
 	# Tabletop top surface is y=0.0 so the existing lamp rig can sit on it without
-	# changing animation joint offsets.
+	# changing animation joint offsets. The desk is intentionally plain: no
+	# procedural grain strips or texture overlays.
 	root.add_child(_box_mesh("WideWoodTabletop", Vector3(6.55, 0.16, 2.75), Vector3(0.0, -0.08, -0.30), wood_material))
 	root.add_child(_box_mesh("TableFrontThickEdge", Vector3(6.62, 0.20, 0.12), Vector3(0.0, -0.20, -1.70), wood_dark_material))
 	root.add_child(_box_mesh("TableRightSideEdge", Vector3(0.14, 0.18, 2.76), Vector3(3.22, -0.19, -0.30), wood_dark_material))
@@ -125,17 +127,6 @@ func _build_reference_desk(root: Node3D, wood_material: Material, wood_dark_mate
 	root.add_child(_box_mesh("RightDrawerBlock", Vector3(1.35, 0.56, 0.13), Vector3(1.70, -0.58, -1.50), wood_material))
 	root.add_child(_box_mesh("RightDrawerTopLine", Vector3(1.32, 0.035, 0.145), Vector3(1.70, -0.31, -1.585), wood_light_material))
 	root.add_child(_box_mesh("RightDrawerHandle", Vector3(0.38, 0.08, 0.04), Vector3(1.70, -0.58, -1.61), handle_material))
-	_add_table_grain(root, wood_light_material, wood_dark_material)
-
-
-func _add_table_grain(root: Node3D, light_material: Material, dark_material: Material) -> void:
-	var z_values: Array[float] = [-1.34, -1.06, -0.78, -0.51, -0.24, 0.03, 0.30, 0.58, 0.86]
-	for index: int in range(z_values.size()):
-		var z_value: float = z_values[index]
-		var x_offset: float = -0.55 + float(index % 4) * 0.34
-		var length: float = 4.8 + float(index % 3) * 0.35
-		var grain_material: Material = light_material if index % 2 == 0 else dark_material
-		root.add_child(_box_mesh("TabletopGrain_%02d" % index, Vector3(length, 0.006, 0.012), Vector3(x_offset, 0.004, z_value), grain_material))
 
 
 func _build_large_window(root: Node3D, frame_material: Material, sky_material: Material, glass_material: Material) -> void:

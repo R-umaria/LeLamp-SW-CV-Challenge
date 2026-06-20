@@ -30,15 +30,15 @@ This patch keeps the backend, browser chat, object memory, LLM recall, UDP comma
 
 Changed in `frontend_godot/scripts/Main.gd`:
 
-- Replaced the plain demo backdrop with a runtime `RoomRoot` containing off-white walls, left wall, ceiling, floor/baseboard trim, large wooden table, right-side drawer block, and large horizontal back-wall window.
+- Replaced the plain demo backdrop with a runtime `RoomRoot` containing off-white walls, left wall, raised ceiling, wider floor/baseboard trim, plain wooden table, right-side drawer block, and large horizontal back-wall window.
 - Added a pale sky panel, dark window frame/sill, lightweight grey building blocks, and low-poly green tree silhouettes behind the lamp.
-- Rescaled and positioned the existing `LampRig` on the tabletop so the lamp is smaller relative to the table/window and faces the front-right camera view.
+- Rescaled and positioned the existing `LampRig` on the tabletop so the lamp is larger and easier to read in the final demo while still facing the front-right camera view.
 - Moved the `Camera3D` to a right-front table-corner perspective that shows the table surface, lamp full body, and wide window.
 - Added softer daylight/fill lighting and a brighter ambient world background to remove the black/debug look.
 - Kept the debug panel small, preserved the recall response panel, and did not add or expose a Godot text input box.
 
 Validation focus:
 
-- The scene should resemble the reference composition: large wood tabletop in foreground, wide horizontal window in back, small lamp centered-left on the table, and front-right diagonal camera angle.
+- The scene should resemble the reference composition: large plain wood tabletop in foreground, wide horizontal window in back, enlarged lamp centered-left on the table, taller room volume, and front-right diagonal camera angle.
 - Existing motions should remain readable: `idle_breathe`, `attentive_nod`, `searching_glance`, `curious_tilt`/`soft_pulse`, `thinking`/`focus_glow`, `scanning`, and `sleep`.
 - Godot remains an animation/display frontend only.
