@@ -1,8 +1,13 @@
 extends Node3D
 
 const DEG: float = PI / 180.0
-const FACE_FOLLOW_MAX_DEG: float = 30.0
-const FACE_FOLLOW_SMOOTH_SPEED: float = 4.0
+const MotionSkillLibrary = preload("res://scripts/lumos/MotionSkillLibrary.gd")
+const LightSkillLibrary = preload("res://scripts/lumos/LightSkillLibrary.gd")
+
+@export var face_follow_max_degrees: float = 46.0
+@export var face_follow_smooth_speed: float = 2.10
+@export var motion_time_scale: float = 0.58
+@export var smooth_speed_scale: float = 0.84
 
 @onready var base_yaw: Node3D = $BaseYaw_DOF1
 @onready var shoulder_pitch: Node3D = $BaseYaw_DOF1/ShoulderPitch_DOF2
@@ -29,6 +34,7 @@ var face_x_norm: float = -1.0
 var face_y_norm: float = -1.0
 
 var _time: float = 0.0
+var _motion_started_at: float = 0.0
 var _smoothed_face_follow_deg: float = 0.0
 var _target: Dictionary = {
 	"base_yaw": 0.0,
@@ -51,7 +57,7 @@ func _ready() -> void:
 
 
 func _bind_runtime_materials() -> void:
-	# The geometry is now editor-authored in LampRig.tscn. Runtime code only binds
+	# The geometry is editor-authored in LampRig.tscn. Runtime code only binds
 	# mutable material instances for behavior-driven color/emission changes.
 	head_material = _make_material(Color(1.0, 0.86, 0.48), true)
 	cone_material = _make_transparent_material(Color(1.0, 0.82, 0.30, 0.18))
@@ -63,14 +69,16 @@ func _bind_runtime_materials() -> void:
 
 
 func apply_command(command: Dictionary) -> void:
-	# This is intentionally a bounded renderer. It reads backend command fields
-	# and maps them to known animation targets; it does not infer engagement or
-	# choose behavior policies on its own.
+	# This remains a bounded renderer. It maps backend command fields to known
+	# skills and never performs perception, memory, or open-ended decision making.
 	current_state = str(command.get("state", current_state))
 
 	var behavior: Dictionary = _dictionary_value(command, "behavior")
-	current_motion = str(behavior.get("motion", current_motion))
-	current_light = str(behavior.get("light", current_light))
+	var next_motion: String = MotionSkillLibrary.normalize_motion(str(behavior.get("motion", current_motion)))
+	if next_motion != current_motion:
+		_motion_started_at = _time
+	current_motion = next_motion
+	current_light = LightSkillLibrary.normalize_light(str(behavior.get("light", current_light)))
 	current_sound = str(behavior.get("sound", "none"))
 	var speech_value: Variant = behavior.get("speech_text", "")
 	current_speech_text = "" if speech_value == null else str(speech_value)
@@ -87,63 +95,41 @@ func _process(delta: float) -> void:
 	_update_face_follow(delta)
 	_update_motion_targets()
 	_smooth_to_targets(delta)
-	_update_light(delta)
+	_update_light()
 
 
 func _update_face_follow(delta: float) -> void:
 	var desired_follow_deg: float = 0.0
-	if face_x_norm >= 0.0 and face_x_norm <= 1.0 and current_motion != "sleep_rest" and current_motion != "sleep":
+	if face_x_norm >= 0.0 and face_x_norm <= 1.0 and not MotionSkillLibrary.blocks_face_follow(current_motion):
 		# Camera-frame x=0 is user's left. Positive Godot yaw turns the lamp's
 		# local -Z/front direction left from the viewer's perspective.
-		desired_follow_deg = clampf((0.5 - face_x_norm) * FACE_FOLLOW_MAX_DEG * 2.0, -FACE_FOLLOW_MAX_DEG, FACE_FOLLOW_MAX_DEG)
-	var weight: float = clampf(delta * FACE_FOLLOW_SMOOTH_SPEED, 0.0, 1.0)
+		desired_follow_deg = clampf((0.5 - face_x_norm) * face_follow_max_degrees * 2.0, -face_follow_max_degrees, face_follow_max_degrees)
+	var weight: float = clampf(delta * face_follow_smooth_speed, 0.0, 1.0)
 	_smoothed_face_follow_deg = lerpf(_smoothed_face_follow_deg, desired_follow_deg, weight)
 
 
 func _update_motion_targets() -> void:
-	var t: float = _time
-	var motion: String = current_motion
-
-	if motion == "sleep_rest" or motion == "sleep":
-		_set_target(-85.0, 85.0, -140.0, 20.0, 0.0, -20.0, 0.0)
-	elif motion == "idle" or motion == "idle_breathe":
-		var breathe: float = sin(t * 0.85)
-		var sway: float = sin(t * 0.48)
-		_set_target(2.4 * sway, -18.0 + 1.4 * breathe, 37.0 + 1.2 * breathe, -19.0 + 1.8 * sin(t * 0.95), 1.6 * sway, 1.4 * sin(t * 0.72), 0.45)
-	elif motion == "attentive_nod":
-		var nod: float = maxf(0.0, sin(t * 3.9))
-		_set_target(0.0, -13.0, 33.0, -24.0 - 3.6 * nod, 0.0, 3.0 + 4.0 * nod, 1.0)
-	elif motion == "searching_glance":
-		var scan: float = sin(t * 0.72)
-		_set_target(21.0 * scan, -16.0, 39.0, -18.0, 16.0 * sin(t * 0.92), -5.0 + 2.5 * sin(t * 0.66), 0.30)
-	elif motion == "curious_tilt":
-		var anticipation: float = maxf(0.0, sin(t * 2.0))
-		var tiny_bounce: float = 1.2 * sin(t * 3.0)
-		_set_target(5.0 * sin(t * 0.78), -13.0 - tiny_bounce, 41.0 + tiny_bounce, -25.0 - 2.2 * anticipation, 13.0, -18.0 + 3.5 * sin(t * 1.75), 0.65)
-	elif motion == "scanning":
-		_set_target(38.0 * sin(t * 0.62), -11.0 + 3.5 * sin(t * 0.95), 42.0, -21.0, 24.0 * sin(t * 1.15), -8.0, 0.15)
-	elif motion == "thinking" or motion == "recalling":
-		_set_target(-2.0 + 2.6 * sin(t * 0.75), -14.5, 42.0, -30.0 + 2.0 * sin(t * 1.8), -7.0 + 3.0 * sin(t * 0.9), -17.0 + 2.2 * sin(t * 1.55), 0.40)
-	else:
-		_set_target(0.0, -18.0, 36.0, -18.0, 0.0, 0.0, 0.50)
+	var scaled_time: float = _time * motion_time_scale
+	var motion_elapsed_s: float = maxf(0.0, _time - _motion_started_at)
+	var target_degrees: PackedFloat32Array = MotionSkillLibrary.target_for(current_motion, scaled_time, motion_elapsed_s)
+	_set_target_from_degrees(target_degrees)
 
 
-func _set_target(base_deg: float, shoulder_deg: float, elbow_deg: float, wrist_pitch_deg: float, wrist_yaw_deg: float, head_tilt_deg: float, follow_weight: float) -> void:
-	var follow_deg: float = _smoothed_face_follow_deg * clampf(follow_weight, 0.0, 1.0)
-	_target["base_yaw"] = (base_deg + follow_deg) * DEG
-	_target["shoulder_pitch"] = shoulder_deg * DEG
-	_target["elbow_pitch"] = elbow_deg * DEG
-	_target["wrist_pitch"] = wrist_pitch_deg * DEG
-	_target["wrist_yaw"] = (wrist_yaw_deg + follow_deg * 0.32) * DEG
-	_target["head_tilt"] = head_tilt_deg * DEG
+func _set_target_from_degrees(target_degrees: PackedFloat32Array) -> void:
+	if target_degrees.size() < MotionSkillLibrary.TARGET_SIZE:
+		return
+	var follow_weight: float = clampf(target_degrees[6], 0.0, 1.0)
+	var follow_deg: float = _smoothed_face_follow_deg * follow_weight
+	_target["base_yaw"] = clampf(target_degrees[0] + follow_deg, -135.0, 135.0) * DEG
+	_target["shoulder_pitch"] = clampf(target_degrees[1], -95.0, 95.0) * DEG
+	_target["elbow_pitch"] = clampf(target_degrees[2], -150.0, 115.0) * DEG
+	_target["wrist_pitch"] = clampf(target_degrees[3], -80.0, 80.0) * DEG
+	_target["wrist_yaw"] = clampf(target_degrees[4] + follow_deg * 0.42, -80.0, 80.0) * DEG
+	_target["head_tilt"] = clampf(target_degrees[5], -55.0, 35.0) * DEG
 
 
 func _smooth_to_targets(delta: float) -> void:
-	var speed: float = 7.5
-	if current_motion == "thinking" or current_motion == "recalling":
-		speed = 10.5
-	elif current_motion == "sleep_rest" or current_motion == "sleep":
-		speed = 4.2
+	var speed: float = MotionSkillLibrary.smooth_speed_for(current_motion) * smooth_speed_scale
 	var weight: float = clampf(delta * speed, 0.0, 1.0)
 	base_yaw.rotation.y = lerp_angle(base_yaw.rotation.y, float(_target["base_yaw"]), weight)
 	shoulder_pitch.rotation.x = lerp_angle(shoulder_pitch.rotation.x, float(_target["shoulder_pitch"]), weight)
@@ -153,44 +139,15 @@ func _smooth_to_targets(delta: float) -> void:
 	lamp_head_tilt.rotation.x = lerp_angle(lamp_head_tilt.rotation.x, float(_target["head_tilt"]), weight)
 
 
-func _update_light(_delta: float) -> void:
-	var energy: float = 0.6
-	var pulse: float = 0.0
-	var head_color: Color = Color(1.0, 0.86, 0.48)
+func _update_light() -> void:
+	var scaled_time: float = _time * motion_time_scale
+	var light_values: PackedFloat32Array = LightSkillLibrary.values_for(current_light, scaled_time)
+	if light_values.size() < 4:
+		return
+	var head_color: Color = Color(light_values[0], light_values[1], light_values[2])
+	var energy: float = light_values[3]
 
-	if current_light == "sleep_red":
-		pulse = 0.5 + 0.5 * sin(_time * 0.7)
-		energy = 0.055 + pulse * 0.025
-		head_color = Color(0.55, 0.035, 0.03)
-	elif current_light == "dim_warm":
-		pulse = 0.5 + 0.5 * sin(_time * 0.85)
-		energy = 0.34 + pulse * 0.08
-		head_color = Color(1.0, 0.86, 0.48)
-	elif current_light == "steady_warm":
-		energy = 1.16
-		head_color = Color(1.0, 0.82, 0.40)
-	elif current_light == "slow_pulse":
-		pulse = 0.5 + 0.5 * sin(_time * 1.45)
-		energy = 0.55 + pulse * 0.55
-		head_color = Color(1.0, 0.72, 0.30)
-	elif current_light == "soft_pulse":
-		pulse = 0.5 + 0.5 * sin(_time * 2.15)
-		energy = 0.82 + pulse * 0.55
-		head_color = Color(1.0, 0.62, 0.24)
-	elif current_light == "scan_sweep":
-		pulse = 0.5 + 0.5 * sin(_time * 3.1)
-		energy = 0.82 + pulse * 0.45
-		head_color = Color(0.62, 0.80, 1.0)
-	elif current_light == "focus_glow":
-		pulse = 0.5 + 0.5 * sin(_time * 1.15)
-		energy = 1.05 + pulse * 0.20
-		head_color = Color(0.74, 0.76, 1.0)
-	else:
-		energy = 0.72
-
-	# Frontend light audit/fix: previous versions changed the emissive lamp-head
-	# material, but left the actual SpotLight3D color at its default. Keep the
-	# physical light beam and visible cone synchronized with the lamp body color.
+	# Keep the physical SpotLight3D, emissive lamp head, shade, and visible cone synchronized.
 	if spot_light != null:
 		spot_light.light_energy = energy
 		spot_light.light_color = head_color
@@ -218,6 +175,7 @@ func _dictionary_value(source: Dictionary, key: String) -> Dictionary:
 	if typeof(value) == TYPE_DICTIONARY:
 		return value as Dictionary
 	return {}
+
 
 func _make_material(color: Color, emissive: bool) -> StandardMaterial3D:
 	var mat: StandardMaterial3D = StandardMaterial3D.new()

@@ -78,10 +78,10 @@ func _apply_optional_demo_framing() -> void:
 
 
 func _build_ui() -> void:
-	if has_node("LeLampCanvas"):
+	if has_node("LumosCanvas"):
 		return
 	var canvas: CanvasLayer = CanvasLayer.new()
-	canvas.name = "LeLampCanvas"
+	canvas.name = "LumosCanvas"
 	add_child(canvas)
 	_build_debug_panel(canvas)
 	_build_response_panel(canvas)
@@ -128,7 +128,7 @@ func _build_response_panel(canvas: CanvasLayer) -> void:
 	margin.add_child(vbox)
 
 	var title: Label = Label.new()
-	title.text = "LeLamp recall answer"
+	title.text = "Lumos recall answer"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	title.add_theme_font_size_override("font_size", 14)
 	vbox.add_child(title)
@@ -221,9 +221,9 @@ func _refresh_debug_ui() -> void:
 	var face_y_text: String = _optional_debug_value(engagement.get("face_y_norm", null))
 
 	var lines: Array[String] = []
-	lines.append("LeLamp Milestone 4.3.6 Editable Godot Scene")
+	lines.append("Lumos Milestone 4.4 Expressive Skills Scene")
 	lines.append("UDP: %s" % _receiver_status)
-	lines.append("Browser chat: http://127.0.0.1:8765")
+	lines.append("Lumos browser chat: http://127.0.0.1:8765")
 	lines.append("Health: %s  age: %.1fs" % [connection_health, packet_age_s])
 	lines.append("State: %s" % str(_last_command.get("state", "unknown")))
 	lines.append("Motion: %s  Light: %s" % [str(behavior.get("motion", "none")), str(behavior.get("light", "none"))])
@@ -280,8 +280,8 @@ func _sleep_command(age_s: float) -> Dictionary:
 			"reason": "backend_stale_local_sleep",
 		},
 		"behavior": {
-			"motion": "sleep_rest",
-			"light": "sleep_red",
+			"motion": "sleepy_search_then_rest",
+			"light": "dim_warm",
 			"sound": null,
 			"speech_text": null,
 		},

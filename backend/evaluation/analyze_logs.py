@@ -1,4 +1,4 @@
-"""Analyze one isolated LeLamp backend run.
+"""Analyze one isolated Lumos backend run.
 
 Preferred usage:
     python -m backend.evaluation.analyze_logs --latest
@@ -34,7 +34,7 @@ STOP_RE = re.compile(r"^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*Stopped Mil
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Analyze one LeLamp backend run")
+    parser = argparse.ArgumentParser(description="Analyze one Lumos backend run")
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--run-dir", type=str, help="Analyze a specific logs/runs/<run_id> directory")
     selection.add_argument("--latest", action="store_true", help="Analyze logs/latest")
@@ -334,7 +334,7 @@ def main() -> int:
     start_dt, end_dt = run_time_bounds(runtime_start, runtime_stop, latency_points, command_points, transitions)
     duration_s = (end_dt - start_dt).total_seconds() if start_dt and end_dt else None
 
-    print("LeLamp Milestone 2-Compatible Run Summary")
+    print("Lumos Run Summary")
     print("===================================")
     print(f"run_dir: {run_dir}")
     print(f"run_start: {format_dt(start_dt)}")

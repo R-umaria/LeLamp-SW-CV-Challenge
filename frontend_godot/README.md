@@ -1,6 +1,6 @@
-# LeLamp Godot Frontend
+# Lumos Godot Frontend
 
-This is the lightweight Godot embodiment layer for the LeLamp challenge prototype. It receives bounded backend behavior commands over UDP and maps them to controlled 6-DOF placeholder lamp animations.
+This is the lightweight Godot embodiment layer for the Lumos challenge prototype. It receives bounded backend behavior commands over UDP and maps them to controlled 6-DOF placeholder lamp animations.
 
 Godot does **not** make engagement, memory, recall, or behavior decisions. The Python backend remains the intelligence layer.
 
@@ -55,7 +55,7 @@ Runtime-created UI:
 
 ```text
 Main
-└── LeLampCanvas (CanvasLayer)
+└── LumosCanvas (CanvasLayer)
     ├── DebugPanel (PanelContainer)
     │   └── DebugLabel (Label)
     └── RecallResponsePanel (PanelContainer)

@@ -11,7 +11,7 @@ def setup_logging(
     log_dir: str | Path = "logs",
     extra_runtime_log_paths: Iterable[str | Path] | None = None,
 ) -> logging.Logger:
-    """Configure the LeLamp logger.
+    """Configure the Lumos logger.
 
     Parameters
     ----------

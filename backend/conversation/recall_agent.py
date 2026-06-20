@@ -1,4 +1,4 @@
-"""Grounded live conversation agent for LeLamp Milestone 4.3.
+"""Grounded live conversation agent for Lumos Milestone 4.4.
 
 The recall path is deliberately bounded:
 
@@ -45,7 +45,7 @@ RECALL_RESPONSE_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
-SYSTEM_MESSAGE = """You are the voice of a LeLamp-inspired robotic lamp.
+SYSTEM_MESSAGE = """You are the voice of a Lumos robotic lamp.
 You are only a wording layer. The backend has already retrieved the only facts you may use.
 Return exactly one JSON object matching the provided schema.
 Do not invent object locations. Do not mention frame paths, SQLite, JSON, IDs, logs, files, or implementation details.
@@ -613,7 +613,7 @@ def _coerce_paths(paths: str | Path | Iterable[str | Path] | None) -> list[Path]
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Ask LeLamp grounded questions about stored object memory")
+    parser = argparse.ArgumentParser(description="Ask Lumos grounded questions about stored object memory")
     parser.add_argument("query", nargs="?", help="Question, e.g. 'Where did you last see my phone?'")
     parser.add_argument("--memory-db", type=str, default="data/scene_memory.sqlite", help="SQLite scene-memory database path")
     parser.add_argument("--use-llm", action="store_true", help="Use Ollama/local LLM only to phrase retrieved memory answers")

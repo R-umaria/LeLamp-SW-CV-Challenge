@@ -1,4 +1,4 @@
-"""Run-directory management for LeLamp backend logs.
+"""Run-directory management for Lumos backend logs.
 
 Each backend invocation writes into a unique run folder under:
     logs/runs/YYYY-MM-DD_HH-MM-SS/

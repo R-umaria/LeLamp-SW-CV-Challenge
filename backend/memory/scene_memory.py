@@ -149,7 +149,7 @@ class SceneMemory:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Inspect or clear LeLamp scene memory")
+    parser = argparse.ArgumentParser(description="Inspect or clear Lumos scene memory")
     parser.add_argument("--db", type=str, default="data/scene_memory.sqlite", help="SQLite memory database path")
 
     action = parser.add_mutually_exclusive_group(required=True)

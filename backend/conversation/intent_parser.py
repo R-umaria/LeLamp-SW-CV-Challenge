@@ -1,4 +1,4 @@
-"""Conversation intent parser for live LeLamp recall.
+"""Conversation intent parser for live Lumos recall.
 
 The parser is intentionally deterministic. It does not try to solve general NLU;
 it only separates demo-critical grounded intents before object extraction:

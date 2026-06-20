@@ -326,7 +326,7 @@ def _read_error_body(exc: urllib.error.HTTPError) -> str:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Test/warm Ollama connectivity for LeLamp grounded recall")
+    parser = argparse.ArgumentParser(description="Test/warm Ollama connectivity for Lumos grounded recall")
     parser.add_argument("--ollama-url", type=str, default="http://localhost:11434")
     parser.add_argument("--ollama-model", type=str, default="qwen2.5:1.5b")
     parser.add_argument("--llm-timeout", type=float, default=90.0)

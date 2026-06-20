@@ -1,4 +1,4 @@
-"""Configuration defaults for the LeLamp backend.
+"""Configuration defaults for the Lumos backend.
 
 Milestone 3 preserves the stable engagement/FSM/Godot path and adds optional
 object detection plus SQLite scene memory. Object detection is disabled unless

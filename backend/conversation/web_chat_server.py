@@ -64,7 +64,7 @@ class WebChatServer:
         parent = self
 
         class Handler(BaseHTTPRequestHandler):
-            server_version = "LeLampWebChat/4.3.2"
+            server_version = "LumosWebChat/4.4.0"
 
             def log_message(self, fmt: str, *args: object) -> None:  # noqa: D401 - stdlib override
                 parent.logger.info("web_chat %s - " + fmt, self.address_string(), *args)
@@ -229,7 +229,7 @@ _HTML = r"""<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LeLamp Browser Chat</title>
+  <title>Lumos Browser Chat</title>
   <style>
     :root { color-scheme: dark; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     body { margin: 0; background: #101114; color: #f4f4f5; }
@@ -253,7 +253,7 @@ _HTML = r"""<!doctype html>
 </head>
 <body>
   <main>
-    <h1>LeLamp Browser Chat</h1>
+    <h1>Lumos Browser Chat</h1>
     <div id="status" class="status">backend connected</div>
     <section class="panel">
       <div id="history"></div>
@@ -261,7 +261,7 @@ _HTML = r"""<!doctype html>
         <input id="text" autocomplete="off" placeholder="Where did you last see my phone?" autofocus />
         <button id="send" type="submit">Send</button>
       </form>
-      <div class="hint">Final demo input lives here. Godot only displays the lamp state and recall answer.</div>
+      <div class="hint">Final demo input lives here. Godot displays Lumos state and recall answer.</div>
     </section>
   </main>
 <script>

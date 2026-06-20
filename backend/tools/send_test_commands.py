@@ -1,7 +1,10 @@
-"""Send fake LeLamp behavior commands to Godot without a webcam.
+"""Send fake Lumos behavior commands to Godot without a webcam.
 
 Run from the project root:
-    python -m backend.tools.send_test_commands --count 24 --interval 1.0
+    python -m backend.tools.send_test_commands --count 24 --interval 1.2
+
+This is useful for checking the bounded expressive skill vocabulary before
+running the full webcam/backend pipeline.
 """
 
 from __future__ import annotations
@@ -26,18 +29,33 @@ TEST_SEQUENCE: list[dict] = [
     },
     {
         "state": "engaged",
-        "engagement": {"status": "engaged", "confidence": 0.92, "reason": "test_face_centered", "face_x_norm": 0.50, "face_y_norm": 0.48},
-        "behavior": {"motion": "attentive_nod", "light": "steady_warm", "sound": None, "speech_text": None},
+        "engagement": {"status": "engaged", "confidence": 0.94, "reason": "test_eye_contact", "face_x_norm": 0.50, "face_y_norm": 0.48},
+        "behavior": {"motion": "excited_greeting", "light": "excited_pink", "sound": "happy_ping", "speech_text": None},
+    },
+    {
+        "state": "engaged",
+        "engagement": {"status": "engaged", "confidence": 0.90, "reason": "test_face_follow_left", "face_x_norm": 0.18, "face_y_norm": 0.50},
+        "behavior": {"motion": "attentive_follow", "light": "steady_warm", "sound": None, "speech_text": None},
+    },
+    {
+        "state": "engaged",
+        "engagement": {"status": "engaged", "confidence": 0.91, "reason": "test_face_follow_right", "face_x_norm": 0.84, "face_y_norm": 0.50},
+        "behavior": {"motion": "attentive_follow", "light": "steady_warm", "sound": None, "speech_text": None},
     },
     {
         "state": "disengaged",
         "engagement": {"status": "disengaged", "confidence": 0.77, "reason": "test_head_turned", "face_x_norm": 0.18, "face_y_norm": 0.50},
-        "behavior": {"motion": "searching_glance", "light": "slow_pulse", "sound": None, "speech_text": None},
+        "behavior": {"motion": "searching_glance_slow", "light": "slow_pulse", "sound": None, "speech_text": None},
     },
     {
         "state": "seeking_attention",
         "engagement": {"status": "disengaged", "confidence": 0.84, "reason": "test_sustained_disengagement", "face_x_norm": 0.82, "face_y_norm": 0.52},
         "behavior": {"motion": "curious_tilt", "light": "soft_pulse", "sound": "gentle_chime", "speech_text": None},
+    },
+    {
+        "state": "seeking_attention",
+        "engagement": {"status": "disengaged", "confidence": 0.84, "reason": "test_gentle_wave", "face_x_norm": 0.82, "face_y_norm": 0.52},
+        "behavior": {"motion": "gentle_wave", "light": "soft_pulse", "sound": "gentle_chime", "speech_text": None},
     },
     {
         "state": "scanning",
@@ -48,25 +66,40 @@ TEST_SEQUENCE: list[dict] = [
         "state": "recalling",
         "engagement": {"status": "engaged", "confidence": 0.88, "reason": "test_memory_query", "face_x_norm": 0.50, "face_y_norm": 0.50},
         "behavior": {
-            "motion": "thinking",
+            "motion": "thinking_slow",
             "light": "focus_glow",
             "sound": None,
             "speech_text": "Let me check what I remember.",
         },
     },
     {
+        "state": "happy",
+        "engagement": {"status": "engaged", "confidence": 0.93, "reason": "test_happy", "face_x_norm": 0.50, "face_y_norm": 0.50},
+        "behavior": {"motion": "happy_bounce", "light": "happy_gold", "sound": "happy_ping", "speech_text": None},
+    },
+    {
+        "state": "music",
+        "engagement": {"status": "engaged", "confidence": 0.89, "reason": "test_music_playing", "face_x_norm": 0.50, "face_y_norm": 0.50},
+        "behavior": {"motion": "dance_loop", "light": "dance_color", "sound": None, "speech_text": None},
+    },
+    {
+        "state": "upset",
+        "engagement": {"status": "disengaged", "confidence": 0.60, "reason": "test_user_disagreed"},
+        "behavior": {"motion": "upset_turn", "light": "upset_blue", "sound": None, "speech_text": None},
+    },
+    {
         "state": "sleep",
         "engagement": {"status": "absent", "confidence": 0.0, "reason": "test_backend_stale_sleep"},
-        "behavior": {"motion": "sleep_rest", "light": "sleep_red", "sound": None, "speech_text": None},
+        "behavior": {"motion": "sleepy_search_then_rest", "light": "dim_warm", "sound": None, "speech_text": None},
     },
 ]
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Send fake LeLamp commands to the Godot UDP frontend")
+    parser = argparse.ArgumentParser(description="Send fake Lumos commands to the Godot UDP frontend")
     parser.add_argument("--host", default="127.0.0.1", help="Godot UDP host. Use 127.0.0.1 for local demo.")
     parser.add_argument("--port", type=int, default=4242, help="Godot UDP listen port.")
-    parser.add_argument("--interval", type=float, default=1.0, help="Seconds between commands.")
+    parser.add_argument("--interval", type=float, default=1.2, help="Seconds between commands.")
     parser.add_argument("--count", type=int, default=0, help="Number of packets to send. 0 means loop until Ctrl-C.")
     parser.add_argument("--print-json", action="store_true", help="Print each command JSON to stdout.")
     return parser.parse_args()

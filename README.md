@@ -1,4 +1,4 @@
-# LeLamp Challenge - Milestone 1.5.1 Backend
+# Lumos Challenge - Milestone 1.5.1 Backend
 
 Vertical slice: webcam capture -> face-based engagement estimate -> temporal smoothing -> hysteresis finite state machine -> protocol-shaped JSON commands -> isolated run logs -> run-specific evaluation.
 
@@ -7,7 +7,7 @@ Milestone 1.5.1 is a logging/evaluation cleanup. It does **not** add Godot, obje
 ## Setup
 
 ```powershell
-cd lelamp_challenge
+cd lumos_challenge
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r backend\requirements.txt
@@ -16,7 +16,7 @@ pip install -r backend\requirements.txt
 macOS/Linux:
 
 ```bash
-cd lelamp_challenge
+cd lumos_challenge
 python -m venv .venv
 source .venv/bin/activate
 pip install -r backend/requirements.txt

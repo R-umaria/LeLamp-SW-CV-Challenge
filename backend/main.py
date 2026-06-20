@@ -1,4 +1,4 @@
-"""LeLamp backend vertical slice with Milestone 4 grounded recall.
+"""Lumos backend vertical slice with Milestone 4 grounded recall.
 
 Run from the project root with:
     python -m backend.main --show-window
@@ -24,7 +24,7 @@ try:
 except ImportError as exc:  # pragma: no cover - dependency guard
     raise ImportError("OpenCV is required. Install with: pip install opencv-python") from exc
 
-from backend.behavior.behavior_policy import behavior_for_state
+from backend.behavior.behavior_policy import behavior_for_transition
 from backend.behavior.command_protocol import build_behavior_command
 from backend.behavior.godot_udp_sender import GodotUdpSender
 from backend.behavior.state_machine import InteractionStateMachine, LampState
@@ -53,7 +53,7 @@ from backend.utils.run_paths import create_run_paths, write_latest_pointer
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="LeLamp Milestone 4 backend: engagement + object memory + grounded recall")
+    parser = argparse.ArgumentParser(description="Lumos backend: engagement + object memory + grounded recall")
     parser.add_argument("--camera-index", type=int, default=0)
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=480)
@@ -498,7 +498,7 @@ def main() -> int:
             state_machine_ms = (time.perf_counter() - t0) * 1000.0
 
             t0 = time.perf_counter()
-            behavior = behavior_for_state(transition.current_state)
+            behavior = behavior_for_transition(transition)
             command = build_behavior_command(
                 state=transition.current_state,
                 engagement=smoothed_engagement,
@@ -550,7 +550,7 @@ def main() -> int:
                         state=LampState.RECALLING,
                         engagement=smoothed_engagement,
                         behavior={
-                            "motion": "thinking",
+                            "motion": "thinking_slow",
                             "light": "focus_glow",
                             "sound": None,
                             "speech_text": "Thinking...",
@@ -595,7 +595,7 @@ def main() -> int:
                         state=LampState.RECALLING,
                         engagement=smoothed_engagement,
                         behavior={
-                            "motion": "thinking",
+                            "motion": "thinking_slow",
                             "light": "focus_glow",
                             "sound": None,
                             "speech_text": str(answer_text),
@@ -632,7 +632,7 @@ def main() -> int:
                         state=LampState.RECALLING,
                         engagement=smoothed_engagement,
                         behavior={
-                            "motion": "thinking",
+                            "motion": "thinking_slow",
                             "light": "focus_glow",
                             "sound": None,
                             "speech_text": "Thinking...",
@@ -700,7 +700,7 @@ def main() -> int:
                 )
                 if object_detector.enabled:
                     draw_object_overlay(frame, display_detections)
-                cv2.imshow("LeLamp Milestone 4.3.3 - Engagement/Object Memory/Browser Recall", frame)
+                cv2.imshow("Lumos - Engagement/Object Memory/Browser Recall", frame)
                 key = cv2.waitKey(1) & 0xFF
                 if key in (27, ord("q")):
                     logger.info("Quit requested from preview window")
@@ -728,7 +728,7 @@ def main() -> int:
         camera.release()
         if runtime_config.show_window:
             cv2.destroyAllWindows()
-        logger.info("Stopped Milestone 4.3.3 backend")
+        logger.info("Stopped Lumos backend")
 
     return 0
 
