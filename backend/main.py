@@ -115,6 +115,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ollama-timeout", type=float, default=None, help="Backward-compatible alias for --llm-timeout.")
     parser.add_argument("--llm-required", action="store_true", help="Fail fast at startup if Ollama/model is unavailable; live answers still fall back but log failures.")
     parser.add_argument("--recall-lookback-hours", type=float, default=24.0, help="Only answer object-location questions from memories within this many hours. Use 0 for all-time recall.")
+    parser.add_argument("--recall-point-hold-seconds", type=float, default=5.0, help="Seconds to keep Lumos pointing/sad after a completed recall before returning to attentive tracking.")
 
     window_group = parser.add_mutually_exclusive_group()
     window_group.add_argument("--show-window", action="store_true", default=True)
@@ -485,6 +486,7 @@ def main() -> int:
     fps_ema = 0.0
     last_godot_udp_send_ms = None
     last_detected_objects: list[dict] = []
+    active_recall_feedback: dict | None = None
     display_detections = []
 
     try:
@@ -616,6 +618,7 @@ def main() -> int:
                     source = "browser" if web_request is not None else "terminal_or_udp"
                     request_id = web_request.request_id if web_request is not None else RecallWorkItem(text=recall_query, source=source).request_id
                     work_item = RecallWorkItem(text=recall_query, request_id=request_id, source=source)
+                    active_recall_feedback = None
                     pending_recalls[request_id] = {"source": source, "text": recall_query, "queued_at": time.monotonic()}
                     if web_request is not None and web_chat_server is not None:
                         web_chat_server.mark_started(request_id)
@@ -688,6 +691,27 @@ def main() -> int:
                     last_emit_at = time.monotonic()
                     should_emit = False
 
+                    hold_s = max(0.0, float(args.recall_point_hold_seconds))
+                    if hold_s > 0.0:
+                        hold_behavior = dict(recall_behavior)
+                        # Only the first recall command carries the answer text.
+                        # Repeated hold commands preserve the pose/light without
+                        # re-triggering text display or speech every second.
+                        hold_behavior["speech_text"] = None
+                        active_recall_feedback = {
+                            "expires_at": last_emit_at + hold_s,
+                            "behavior": hold_behavior,
+                            "recall_target": recall_target,
+                            "request_id": work_result.request_id,
+                        }
+                        logger.info(
+                            "recall_feedback_hold_started request_id=%s hold_s=%.2f found=%s location=%s",
+                            work_result.request_id,
+                            hold_s,
+                            bool(recall_target.get("found", False)),
+                            recall_target.get("location_label", "none"),
+                        )
+
                     response_payload["godot_command_sent"] = bool(godot_udp_config.enabled)
                     response_payload["godot_udp_ms"] = last_godot_udp_send_ms
                     if work_result.source == "browser" and web_chat_server is not None:
@@ -705,6 +729,14 @@ def main() -> int:
                         llm_fallback_reason or "none",
                     )
 
+            now = time.monotonic()
+            if active_recall_feedback is not None and now >= float(active_recall_feedback["expires_at"]):
+                logger.info(
+                    "recall_feedback_hold_finished request_id=%s",
+                    active_recall_feedback.get("request_id", "unknown"),
+                )
+                active_recall_feedback = None
+
             if should_emit:
                 outgoing_command = command
                 if pending_recalls:
@@ -719,6 +751,15 @@ def main() -> int:
                         },
                         last_detected_objects=last_detected_objects,
                         gesture=gesture_payload,
+                    )
+                elif active_recall_feedback is not None:
+                    outgoing_command = build_behavior_command(
+                        state=LampState.RECALLING,
+                        engagement=smoothed_engagement,
+                        behavior=active_recall_feedback["behavior"],
+                        last_detected_objects=last_detected_objects,
+                        gesture=gesture_payload,
+                        recall_target=active_recall_feedback["recall_target"],
                     )
                 print(json.dumps(outgoing_command, ensure_ascii=False), flush=True)
                 append_jsonl(command_paths, outgoing_command)

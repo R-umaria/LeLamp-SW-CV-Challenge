@@ -222,9 +222,10 @@ func _refresh_debug_ui() -> void:
 	var connection_health: String = "backend stale / sleeping" if _sleeping_due_to_stale else "backend active/waiting"
 	var face_x_text: String = _optional_debug_value(engagement.get("face_x_norm", null))
 	var face_y_text: String = _optional_debug_value(engagement.get("face_y_norm", null))
+	var face_area_text: String = _optional_debug_value(engagement.get("face_area_ratio", null))
 
 	var lines: Array[String] = []
-	lines.append("Lumos Milestone 4.7 Vertical Follow + Recall Pointing")
+	lines.append("Lumos Milestone 4.8 Recall Hold + Distance Follow")
 	lines.append("UDP: %s" % _receiver_status)
 	lines.append("Lumos browser chat: http://127.0.0.1:8765")
 	lines.append("Health: %s  age: %.1fs" % [connection_health, packet_age_s])
@@ -232,7 +233,7 @@ func _refresh_debug_ui() -> void:
 	lines.append("Motion: %s  Light: %s" % [str(behavior.get("motion", "none")), str(behavior.get("light", "none"))])
 	lines.append("Engagement: %s  %.2f" % [str(engagement.get("status", "unknown")), float(engagement.get("confidence", 0.0))])
 	lines.append("Reason: %s" % str(engagement.get("reason", "none")))
-	lines.append("Face hint: x=%s  y=%s" % [face_x_text, face_y_text])
+	lines.append("Face hint: x=%s  y=%s  area=%s" % [face_x_text, face_y_text, face_area_text])
 	lines.append("Gesture: %s  %.2f" % [str(gesture.get("status", "none")), float(gesture.get("confidence", 0.0))])
 	if recall_target.size() > 0:
 		lines.append("Recall target: found=%s loc=%s point=(%s,%s)" % [

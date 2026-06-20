@@ -60,6 +60,7 @@ class EngagementResult:
         if self.face_center_norm is not None:
             payload["face_x_norm"] = round(float(self.face_center_norm[0]), 3)
             payload["face_y_norm"] = round(float(self.face_center_norm[1]), 3)
+            payload["face_area_ratio"] = round(float(self.face_area_ratio), 4)
         return payload
 
     def to_log_dict(self) -> dict:

@@ -281,3 +281,15 @@ python -m backend.main --show-window --godot-udp --enable-gestures --enable-obje
 ```
 
 See `docs/milestone4_7_vertical_follow_recall_pointing.md` for implementation details.
+
+### Milestone 4.8 recall hold + distance-aware tracking
+
+This version adds a 5-second recall feedback hold and distance-aware attentive tracking. When Lumos remembers an object, it keeps pointing toward the remembered region before returning to attentive face tracking. When it does not remember the object within the configured lookback window, it holds the sad/no-memory motion before returning to normal behavior.
+
+Recommended command:
+
+```powershell
+python -m backend.main --show-window --godot-udp --enable-gestures --enable-objects --enable-web-chat --preview-flip-horizontal --recall-lookback-hours 24 --recall-point-hold-seconds 5
+```
+
+See `docs/milestone4_8_recall_hold_distance_follow.md` for implementation details.

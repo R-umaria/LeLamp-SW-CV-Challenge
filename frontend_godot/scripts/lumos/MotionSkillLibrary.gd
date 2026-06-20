@@ -155,13 +155,17 @@ static func _sleep_rest(_t: float) -> PackedFloat32Array:
 
 
 static func _sleepy_search_then_rest(t: float, elapsed_s: float) -> PackedFloat32Array:
-	# Longer pre-sleep scan: Lumos checks left, right, high, and low before folding
-	# back into the preserved sleep pose.
-	if elapsed_s < 5.8:
-		var fade: float = clampf(1.0 - (elapsed_s / 5.8), 0.18, 1.0)
-		var scan: float = (0.72 * sin(t * 0.72) + 0.28 * sin(t * 1.55)) * fade
-		var lift: float = sin(t * 0.95 + 0.6) * fade
-		return _target(58.0 * scan, 48.0 + 8.0 * lift, -104.0 - 12.0 * lift, 26.0 + 6.0 * lift, -32.0 * scan, -12.0 + 7.0 * lift, 0.0)
+	# Use elapsed wall-clock time here instead of the globally slowed animation time
+	# so the pre-sleep scan reliably reaches the same extreme left/right region as
+	# face tracking before Lumos curls into its rest posture.
+	var scan_duration_s: float = 5.8
+	if elapsed_s < scan_duration_s:
+		var progress: float = clampf(elapsed_s / scan_duration_s, 0.0, 1.0)
+		var settle_fade: float = 1.0 if progress < 0.84 else lerpf(1.0, 0.22, (progress - 0.84) / 0.16)
+		var scan: float = sin(progress * TAU * 1.30) * settle_fade
+		var lift: float = sin(progress * TAU * 0.92 + 0.55) * settle_fade
+		var small_search: float = sin(t * 1.35) * 0.12 * settle_fade
+		return _target(82.0 * scan, 49.0 + 15.0 * lift, -108.0 - 10.0 * absf(lift), 29.0 + 8.0 * lift, -50.0 * scan, -14.0 + 12.0 * lift + small_search, 0.0)
 	return _sleep_rest(t)
 
 
@@ -229,7 +233,9 @@ static func _recall_not_found(t: float) -> PackedFloat32Array:
 
 
 static func _scanning(t: float) -> PackedFloat32Array:
-	return _target(42.0 * sin(t * 0.32), 30.0 + 3.5 * sin(t * 0.50), -86.0, 24.0, -26.0 * sin(t * 0.58), -8.0, 0.14)
+	var sweep: float = sin(t * 0.46)
+	var lift: float = sin(t * 0.62 + 0.4)
+	return _target(74.0 * sweep, 34.0 + 10.0 * lift, -92.0 - 6.0 * absf(lift), 60.0 + 6.0 * lift, -60.0 * sweep, -10.0 + 8.0 * lift, 0.12)
 
 
 static func _thinking_slow(t: float) -> PackedFloat32Array:
