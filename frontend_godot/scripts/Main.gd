@@ -2,9 +2,9 @@ extends Node3D
 
 @export var response_visible_seconds: float = 8.0
 @export var backend_stale_timeout_seconds: float = 60.0
-@export var camera_position: Vector3 = Vector3(3.35, 1.38, -3.15)
-@export var camera_target: Vector3 = Vector3(-0.24, 0.92, 0.12)
-@export var camera_fov_degrees: float = 52.0
+@export var camera_position: Vector3 = Vector3(2.55, 1.30, -2.35)
+@export var camera_target: Vector3 = Vector3(-0.22, 0.96, 0.06)
+@export var camera_fov_degrees: float = 44.0
 
 @onready var udp_receiver: Node = $UdpCommandReceiver
 @onready var lamp: Node3D = $LampRig
@@ -60,7 +60,7 @@ func _setup_camera_lamp_and_light() -> void:
 	camera.current = true
 
 	# Soft daylight comes from the window side. The fill light keeps the enlarged
-	# lamp readable without flattening the taller room.
+	# lamp readable in the closer camera framing without flattening the taller room.
 	sun.rotation_degrees = Vector3(-42.0, -18.0, 0.0)
 	sun.light_energy = 1.18
 	sun.shadow_enabled = true
@@ -119,6 +119,10 @@ func _build_reference_desk(root: Node3D, wood_material: Material, wood_dark_mate
 	# changing animation joint offsets. The desk is intentionally plain: no
 	# procedural grain strips or texture overlays.
 	root.add_child(_box_mesh("WideWoodTabletop", Vector3(6.55, 0.16, 2.75), Vector3(0.0, -0.08, -0.30), wood_material))
+	root.add_child(_box_mesh("FrontLeftTableLeg", Vector3(0.22, 0.70, 0.22), Vector3(-2.95, -0.50, -1.48), wood_dark_material))
+	root.add_child(_box_mesh("FrontRightTableLeg", Vector3(0.22, 0.70, 0.22), Vector3(2.95, -0.50, -1.48), wood_dark_material))
+	root.add_child(_box_mesh("BackLeftTableLeg", Vector3(0.20, 0.64, 0.20), Vector3(-2.85, -0.48, 0.72), wood_dark_material))
+	root.add_child(_box_mesh("BackRightTableLeg", Vector3(0.20, 0.64, 0.20), Vector3(2.85, -0.48, 0.72), wood_dark_material))
 	root.add_child(_box_mesh("TableFrontThickEdge", Vector3(6.62, 0.20, 0.12), Vector3(0.0, -0.20, -1.70), wood_dark_material))
 	root.add_child(_box_mesh("TableRightSideEdge", Vector3(0.14, 0.18, 2.76), Vector3(3.22, -0.19, -0.30), wood_dark_material))
 	root.add_child(_box_mesh("LeftDeskSidePanel", Vector3(0.18, 0.86, 1.82), Vector3(-2.90, -0.58, -0.52), wood_dark_material))
@@ -132,14 +136,14 @@ func _build_reference_desk(root: Node3D, wood_material: Material, wood_dark_mate
 func _build_large_window(root: Node3D, frame_material: Material, sky_material: Material, glass_material: Material) -> void:
 	# The window fills most of the back wall and stays behind the lamp, matching the
 	# reference image scale ratio without importing any external texture assets.
-	root.add_child(_box_mesh("WindowSkyPanel", Vector3(4.72, 1.58, 0.035), Vector3(0.17, 1.47, 1.235), sky_material))
-	root.add_child(_box_mesh("WindowGlassOverlay", Vector3(4.68, 1.54, 0.020), Vector3(0.17, 1.47, 1.205), glass_material))
-	root.add_child(_box_mesh("WindowTopFrame", Vector3(5.08, 0.12, 0.13), Vector3(0.17, 2.31, 1.185), frame_material))
-	root.add_child(_box_mesh("WindowBottomFrame", Vector3(5.08, 0.12, 0.13), Vector3(0.17, 0.63, 1.185), frame_material))
-	root.add_child(_box_mesh("WindowLeftFrame", Vector3(0.13, 1.80, 0.13), Vector3(-2.43, 1.47, 1.185), frame_material))
-	root.add_child(_box_mesh("WindowRightFrame", Vector3(0.13, 1.80, 0.13), Vector3(2.77, 1.47, 1.185), frame_material))
-	root.add_child(_box_mesh("WindowInnerTopShadow", Vector3(4.82, 0.045, 0.10), Vector3(0.17, 2.16, 1.145), frame_material))
-	root.add_child(_box_mesh("WindowSill", Vector3(5.18, 0.10, 0.28), Vector3(0.17, 0.53, 1.06), frame_material))
+	root.add_child(_box_mesh("WindowSkyPanel", Vector3(4.72, 2.26, 0.035), Vector3(0.17, 1.73, 1.235), sky_material))
+	root.add_child(_box_mesh("WindowGlassOverlay", Vector3(4.68, 2.20, 0.020), Vector3(0.17, 1.73, 1.205), glass_material))
+	root.add_child(_box_mesh("WindowTopFrame", Vector3(5.08, 0.12, 0.13), Vector3(0.17, 2.92, 1.185), frame_material))
+	root.add_child(_box_mesh("WindowBottomFrame", Vector3(5.08, 0.12, 0.13), Vector3(0.17, 0.54, 1.185), frame_material))
+	root.add_child(_box_mesh("WindowLeftFrame", Vector3(0.13, 2.48, 0.13), Vector3(-2.43, 1.73, 1.185), frame_material))
+	root.add_child(_box_mesh("WindowRightFrame", Vector3(0.13, 2.48, 0.13), Vector3(2.77, 1.73, 1.185), frame_material))
+	root.add_child(_box_mesh("WindowInnerTopShadow", Vector3(4.82, 0.045, 0.10), Vector3(0.17, 2.73, 1.145), frame_material))
+	root.add_child(_box_mesh("WindowSill", Vector3(5.18, 0.10, 0.28), Vector3(0.17, 0.44, 1.06), frame_material))
 
 
 func _build_outdoor_silhouette(root: Node3D, building_material: Material, distant_building_material: Material, tree_material: Material, tree_light_material: Material) -> void:
@@ -177,8 +181,8 @@ func _add_window_tree(root: Node3D, node_name: String, x_pos: float, y_pos: floa
 func _add_daylight_fill(root: Node3D) -> void:
 	var window_light: OmniLight3D = OmniLight3D.new()
 	window_light.name = "WindowSoftDaylight"
-	window_light.position = Vector3(-0.35, 1.88, 0.88)
-	window_light.light_energy = 0.46
+	window_light.position = Vector3(-0.35, 2.16, 0.88)
+	window_light.light_energy = 0.42
 	window_light.omni_range = 4.2
 	root.add_child(window_light)
 
@@ -351,7 +355,7 @@ func _refresh_debug_ui() -> void:
 	var face_y_text: String = _optional_debug_value(engagement.get("face_y_norm", null))
 
 	var lines: Array[String] = []
-	lines.append("LeLamp Milestone 4.3.3 Scene Polish")
+	lines.append("LeLamp Milestone 4.3.5 Frontend Polish")
 	lines.append("UDP: %s" % _receiver_status)
 	lines.append("Browser chat: http://127.0.0.1:8765")
 	lines.append("Health: %s  age: %.1fs" % [connection_health, packet_age_s])

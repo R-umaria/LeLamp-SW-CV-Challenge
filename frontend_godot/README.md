@@ -14,6 +14,18 @@ Milestone 4.3.3 keeps Godot as a bounded animation/display layer while making th
 
 The 6-DOF animation axes are unchanged. The polish is procedural motion, camera placement, lighting, and simple primitive scene geometry. No imported model, voice input, perception logic, memory logic, or new AI dependency was added to Godot.
 
+
+## Milestone 4.3.5 frontend polish update
+
+This update remains frontend-only. It keeps Python as the perception/state/memory/recall owner and uses Godot only as the expressive embodiment layer.
+
+Changed in the simulator scene:
+
+- Increased the back-wall window height so the window reads as a taller architectural feature, not a thin horizontal strip.
+- Added four visible table legs under the plain wooden tabletop. The tabletop remains untextured/plain.
+- Zoomed the camera closer toward the lamp from the right/front table-corner composition.
+- Audited lamp light behavior: previous code updated the emissive lamp-head/body material but did not update `SpotLight3D.light_color`. The actual spotlight color and visible cone color now synchronize with the lamp body/emission color for `sleep_red`, warm pulse, scanning, and focus/recall states.
+
 ## Folder layout
 
 ```text

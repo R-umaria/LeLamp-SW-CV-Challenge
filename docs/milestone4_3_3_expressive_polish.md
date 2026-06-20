@@ -42,3 +42,29 @@ Validation focus:
 - The scene should resemble the reference composition: large plain wood tabletop in foreground, wide horizontal window in back, enlarged lamp centered-left on the table, taller room volume, and front-right diagonal camera angle.
 - Existing motions should remain readable: `idle_breathe`, `attentive_nod`, `searching_glance`, `curious_tilt`/`soft_pulse`, `thinking`/`focus_glow`, `scanning`, and `sleep`.
 - Godot remains an animation/display frontend only.
+
+
+## Milestone 4.3.5 frontend polish update
+
+Scope: Godot presentation layer only. Backend perception, state management, behavior policy, UDP command shape, object memory, browser chat, and LLM recall were not changed.
+
+Changed in `frontend_godot/scripts/Main.gd`:
+
+- Increased the procedural window height by enlarging the sky/glass panels and moving the top frame higher.
+- Added four table legs beneath the plain wooden desk.
+- Zoomed the camera closer to the lamp while preserving the right/front table-corner viewpoint.
+- Updated the debug label to identify this as the 4.3.5 frontend polish scene.
+
+Changed in `frontend_godot/scripts/LampController.gd`:
+
+- Audited the light pipeline and found that prior behavior color changes were applied to the emissive head/body material and marker, while `LampSpotLight.light_color` stayed at the default color.
+- Synchronized `LampSpotLight.light_color` with the current lamp head/emission color.
+- Synchronized `VisibleLightCone` RGB with the current lamp head/emission color while preserving alpha/energy pulsing.
+- Added distinct, bounded light colors for warm, attention pulse, scanning, focus/recall, and sleep states.
+
+Validation focus:
+
+- Window appears taller in the back wall.
+- Table has visible legs and remains plain/untextured.
+- Lamp is larger in frame because the camera is closer/narrower.
+- When backend commands change `behavior.light`, the lamp body/emission, visible cone, and actual `SpotLight3D` emitted color change together.

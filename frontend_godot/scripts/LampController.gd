@@ -246,29 +246,41 @@ func _update_light(_delta: float) -> void:
 		pulse = 0.5 + 0.5 * sin(_time * 0.7)
 		energy = 0.055 + pulse * 0.025
 		head_color = Color(0.55, 0.035, 0.03)
-		marker_color = Color(0.55, 0.035, 0.03)
+		marker_color = head_color
 	elif current_light == "dim_warm":
 		pulse = 0.5 + 0.5 * sin(_time * 0.85)
 		energy = 0.34 + pulse * 0.08
+		head_color = Color(1.0, 0.86, 0.48)
 	elif current_light == "steady_warm":
 		energy = 1.16
+		head_color = Color(1.0, 0.82, 0.40)
 	elif current_light == "slow_pulse":
 		pulse = 0.5 + 0.5 * sin(_time * 1.45)
 		energy = 0.55 + pulse * 0.55
+		head_color = Color(1.0, 0.72, 0.30)
 	elif current_light == "soft_pulse":
 		pulse = 0.5 + 0.5 * sin(_time * 2.15)
 		energy = 0.82 + pulse * 0.55
+		head_color = Color(1.0, 0.62, 0.24)
 	elif current_light == "scan_sweep":
 		pulse = 0.5 + 0.5 * sin(_time * 3.1)
 		energy = 0.82 + pulse * 0.45
+		head_color = Color(0.62, 0.80, 1.0)
+		marker_color = Color(0.62, 0.80, 1.0)
 	elif current_light == "focus_glow":
 		pulse = 0.5 + 0.5 * sin(_time * 1.15)
 		energy = 1.05 + pulse * 0.20
+		head_color = Color(0.74, 0.76, 1.0)
+		marker_color = Color(0.74, 0.76, 1.0)
 	else:
 		energy = 0.72
 
+	# Frontend light audit/fix: previous versions changed the emissive lamp-head
+	# material, but left the actual SpotLight3D color at its default. Keep the
+	# physical light beam and visible cone synchronized with the lamp body color.
 	if spot_light != null:
 		spot_light.light_energy = energy
+		spot_light.light_color = head_color
 
 	if head_material != null:
 		head_material.albedo_color = head_color
@@ -282,9 +294,7 @@ func _update_light(_delta: float) -> void:
 
 	if cone_material != null:
 		var alpha: float = clampf(0.075 + energy * 0.065, 0.07, 0.24)
-		var c: Color = cone_material.albedo_color
-		c.a = alpha
-		cone_material.albedo_color = c
+		cone_material.albedo_color = Color(head_color.r, head_color.g, head_color.b, alpha)
 
 
 func _optional_norm_float(source: Dictionary, key: String, default_value: float) -> float:
