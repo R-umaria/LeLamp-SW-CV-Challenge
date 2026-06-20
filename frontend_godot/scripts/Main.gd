@@ -1,7 +1,7 @@
 extends Node3D
 
 @export var response_visible_seconds: float = 8.0
-@export var backend_stale_timeout_seconds: float = 60.0
+@export var backend_stale_timeout_seconds: float = 5.0
 
 # Keep this false for normal tinkering. When false, Godot uses the positions,
 # rotations, scales, and light settings saved directly in Main.tscn.

@@ -1,7 +1,7 @@
 extends Node3D
 
 const DEG: float = PI / 180.0
-const FACE_FOLLOW_MAX_DEG: float = 14.0
+const FACE_FOLLOW_MAX_DEG: float = 30.0
 const FACE_FOLLOW_SMOOTH_SPEED: float = 4.0
 
 @onready var base_yaw: Node3D = $BaseYaw_DOF1
@@ -105,7 +105,7 @@ func _update_motion_targets() -> void:
 	var motion: String = current_motion
 
 	if motion == "sleep_rest" or motion == "sleep":
-		_set_target(0.0, -48.0, 78.0, -52.0, 0.0, -32.0, 0.0)
+		_set_target(-85.0, 85.0, -140.0, 20.0, 0.0, -20.0, 0.0)
 	elif motion == "idle" or motion == "idle_breathe":
 		var breathe: float = sin(t * 0.85)
 		var sway: float = sin(t * 0.48)
