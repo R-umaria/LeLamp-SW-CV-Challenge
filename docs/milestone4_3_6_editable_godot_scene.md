@@ -80,11 +80,9 @@ LampHead
 LampShade
 LampSpotLight
 VisibleLightCone
-FrontLookMarker
-LookDirectionTip
 ```
 
-The controller uses those names to find and animate the 6-DOF chain.
+The controller uses those names to find and animate the 6-DOF chain and synchronize the visible light cone with the actual spotlight color.
 
 ## Validation focus
 

@@ -81,9 +81,7 @@ LampRig (Node3D) [LampController.gd]
                         ├── LampHead
                         ├── LampShade
                         ├── LampSpotLight
-                        ├── VisibleLightCone
-                        ├── FrontLookMarker
-                        └── LookDirectionTip
+                        └── VisibleLightCone
 ```
 
 The six controlled placeholder degrees of freedom are base yaw, shoulder pitch, elbow pitch, wrist pitch, wrist yaw, and lamp head tilt.
@@ -118,8 +116,6 @@ LampHead
 LampShade
 LampSpotLight
 VisibleLightCone
-FrontLookMarker
-LookDirectionTip
 ```
 
 ## Incoming UDP protocol
@@ -181,7 +177,7 @@ If these fields are missing, Godot falls back to centered procedural animations.
 4. Open the imported project.
 5. Press **F5** or click **Run Project**.
 6. Confirm the debug panel says `Listening on udp://0.0.0.0:4242`.
-7. Confirm the lamp is visible from the camera view and that the light cone/front marker points toward the camera.
+7. Confirm the lamp is visible from the camera view and that the lamp head and visible light cone point toward the camera.
 
 ## Test without webcam
 
@@ -218,7 +214,7 @@ Included:
 - Controlled placeholder motion and light animations.
 - Editable room, large table, tall window, and stylized outdoor skyline scenes.
 - Front/right table-corner demo camera.
-- Visible front/look marker and light cone.
+- Visible light cone only; debug front/look markers removed.
 - Visible debug UI.
 - Visible recall response panel.
 
@@ -229,3 +225,13 @@ Not included:
 - Inverse kinematics.
 - Imported 3D art/model.
 - Real servo control.
+
+
+## Milestone 4.3.7 cleanup note
+
+The editable lamp rig no longer includes the two debug orientation markers that appeared as small floating geometry in front of the lamp head:
+
+- `FrontLookMarker`
+- `LookDirectionTip`
+
+These nodes were useful while checking the lamp's facing direction, but they are not required for UDP behavior, light color changes, recall display, or animation. The final scene now keeps only the actual `LampSpotLight` and translucent `VisibleLightCone`.

@@ -27,14 +27,6 @@ albedo_color = Color(1, 0.82, 0.3, 0.18)
 roughness = 0.3
 metallic = 0.0
 
-[sub_resource type="StandardMaterial3D" id="mat_marker_preview"]
-albedo_color = Color(0.15, 0.45, 1, 1)
-roughness = 0.42
-metallic = 0.0
-emission_enabled = true
-emission = Color(0.15, 0.45, 1, 1)
-emission_energy_multiplier = 0.6
-
 [sub_resource type="CylinderMesh" id="mesh_Base"]
 top_radius = 0.42
 bottom_radius = 0.42
@@ -88,18 +80,6 @@ top_radius = 0.06
 bottom_radius = 0.24
 height = 1.1
 radial_segments = 32
-
-[sub_resource type="CylinderMesh" id="mesh_FrontLookMarker"]
-top_radius = 0.07
-bottom_radius = 0.07
-height = 0.018
-radial_segments = 32
-
-[sub_resource type="SphereMesh" id="mesh_LookDirectionTip"]
-radius = 0.045
-height = 0.09
-radial_segments = 32
-rings = 16
 
 [node name="LampRig" type="Node3D"]
 script = ExtResource("1_lamp_controller")
@@ -173,13 +153,3 @@ material_override = SubResource("mat_cone_preview")
 position = Vector3(0, -0.02, -0.62)
 rotation = Vector3(1.5708, 0, 0)
 
-[node name="FrontLookMarker" type="MeshInstance3D" parent="BaseYaw_DOF1/ShoulderPitch_DOF2/ElbowPitch_DOF3/WristPitch_DOF4/WristYaw_DOF5/LampHeadTilt_DOF6"]
-mesh = SubResource("mesh_FrontLookMarker")
-material_override = SubResource("mat_marker_preview")
-position = Vector3(0, -0.02, -0.275)
-rotation = Vector3(1.5708, 0, 0)
-
-[node name="LookDirectionTip" type="MeshInstance3D" parent="BaseYaw_DOF1/ShoulderPitch_DOF2/ElbowPitch_DOF3/WristPitch_DOF4/WristYaw_DOF5/LampHeadTilt_DOF6"]
-mesh = SubResource("mesh_LookDirectionTip")
-material_override = SubResource("mat_marker_preview")
-position = Vector3(0, -0.02, -0.43)

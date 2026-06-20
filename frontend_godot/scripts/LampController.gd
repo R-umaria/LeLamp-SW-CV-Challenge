@@ -14,12 +14,9 @@ const FACE_FOLLOW_SMOOTH_SPEED: float = 4.0
 @onready var head_mesh: MeshInstance3D = $BaseYaw_DOF1/ShoulderPitch_DOF2/ElbowPitch_DOF3/WristPitch_DOF4/WristYaw_DOF5/LampHeadTilt_DOF6/LampHead
 @onready var shade_mesh: MeshInstance3D = $BaseYaw_DOF1/ShoulderPitch_DOF2/ElbowPitch_DOF3/WristPitch_DOF4/WristYaw_DOF5/LampHeadTilt_DOF6/LampShade
 @onready var cone_mesh: MeshInstance3D = $BaseYaw_DOF1/ShoulderPitch_DOF2/ElbowPitch_DOF3/WristPitch_DOF4/WristYaw_DOF5/LampHeadTilt_DOF6/VisibleLightCone
-@onready var front_marker_mesh: MeshInstance3D = $BaseYaw_DOF1/ShoulderPitch_DOF2/ElbowPitch_DOF3/WristPitch_DOF4/WristYaw_DOF5/LampHeadTilt_DOF6/FrontLookMarker
-@onready var look_tip_mesh: MeshInstance3D = $BaseYaw_DOF1/ShoulderPitch_DOF2/ElbowPitch_DOF3/WristPitch_DOF4/WristYaw_DOF5/LampHeadTilt_DOF6/LookDirectionTip
 
 var head_material: StandardMaterial3D
 var cone_material: StandardMaterial3D
-var front_marker_material: StandardMaterial3D
 
 var current_state: String = "idle"
 var current_motion: String = "idle_breathe"
@@ -58,13 +55,10 @@ func _bind_runtime_materials() -> void:
 	# mutable material instances for behavior-driven color/emission changes.
 	head_material = _make_material(Color(1.0, 0.86, 0.48), true)
 	cone_material = _make_transparent_material(Color(1.0, 0.82, 0.30, 0.18))
-	front_marker_material = _make_material(Color(0.15, 0.45, 1.0), true)
 
 	head_mesh.material_override = head_material
 	shade_mesh.material_override = head_material
 	cone_mesh.material_override = cone_material
-	front_marker_mesh.material_override = front_marker_material
-	look_tip_mesh.material_override = front_marker_material
 	spot_light.light_color = head_material.albedo_color
 
 
@@ -163,13 +157,11 @@ func _update_light(_delta: float) -> void:
 	var energy: float = 0.6
 	var pulse: float = 0.0
 	var head_color: Color = Color(1.0, 0.86, 0.48)
-	var marker_color: Color = Color(0.15, 0.45, 1.0)
 
 	if current_light == "sleep_red":
 		pulse = 0.5 + 0.5 * sin(_time * 0.7)
 		energy = 0.055 + pulse * 0.025
 		head_color = Color(0.55, 0.035, 0.03)
-		marker_color = head_color
 	elif current_light == "dim_warm":
 		pulse = 0.5 + 0.5 * sin(_time * 0.85)
 		energy = 0.34 + pulse * 0.08
@@ -189,12 +181,10 @@ func _update_light(_delta: float) -> void:
 		pulse = 0.5 + 0.5 * sin(_time * 3.1)
 		energy = 0.82 + pulse * 0.45
 		head_color = Color(0.62, 0.80, 1.0)
-		marker_color = Color(0.62, 0.80, 1.0)
 	elif current_light == "focus_glow":
 		pulse = 0.5 + 0.5 * sin(_time * 1.15)
 		energy = 1.05 + pulse * 0.20
 		head_color = Color(0.74, 0.76, 1.0)
-		marker_color = Color(0.74, 0.76, 1.0)
 	else:
 		energy = 0.72
 
@@ -209,11 +199,6 @@ func _update_light(_delta: float) -> void:
 		head_material.albedo_color = head_color
 		head_material.emission = head_color
 		head_material.emission_energy_multiplier = energy * 0.55
-
-	if front_marker_material != null:
-		front_marker_material.albedo_color = marker_color
-		front_marker_material.emission = marker_color
-		front_marker_material.emission_energy_multiplier = 0.42 + energy * 0.25
 
 	if cone_material != null:
 		var alpha: float = clampf(0.075 + energy * 0.065, 0.07, 0.24)
