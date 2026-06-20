@@ -2,9 +2,9 @@ extends Node3D
 
 @export var response_visible_seconds: float = 8.0
 @export var backend_stale_timeout_seconds: float = 60.0
-@export var camera_position: Vector3 = Vector3(2.85, 2.05, -4.65)
-@export var camera_target: Vector3 = Vector3(0.0, 1.22, 0.0)
-@export var camera_fov_degrees: float = 48.0
+@export var camera_position: Vector3 = Vector3(3.05, 1.18, -2.85)
+@export var camera_target: Vector3 = Vector3(-0.28, 0.68, 0.15)
+@export var camera_fov_degrees: float = 54.0
 
 @onready var udp_receiver: Node = $UdpCommandReceiver
 @onready var lamp: Node3D = $LampRig
@@ -26,7 +26,7 @@ var _sleeping_due_to_stale: bool = false
 
 
 func _ready() -> void:
-	_setup_camera_and_light()
+	_setup_camera_lamp_and_light()
 	_build_scene_environment()
 	_build_ui()
 
@@ -47,64 +47,173 @@ func _process(_delta: float) -> void:
 	_update_response_panel()
 
 
-func _setup_camera_and_light() -> void:
-	# The lamp head and visible cone point along the rig's local -Z axis.
-	# Put the camera on that front side with a slight X offset so the final demo
-	# shows the face, cone, head tilt, and arm joints at the same time.
-	lamp.rotation_degrees = Vector3.ZERO
+func _setup_camera_lamp_and_light() -> void:
+	# Scene composition follows the reference image: the lamp is small on a large
+	# desk, with its local -Z/front side aimed toward a front-right camera.
+	lamp.position = Vector3(-0.28, 0.0, 0.08)
+	lamp.scale = Vector3(0.58, 0.58, 0.58)
+	lamp.rotation_degrees = Vector3(0.0, -34.0, 0.0)
+
 	camera.position = camera_position
 	camera.look_at(camera_target, Vector3.UP)
 	camera.fov = camera_fov_degrees
 	camera.current = true
 
-	# Key light from the viewer/front side; fill light keeps the back arm joints readable.
-	sun.rotation_degrees = Vector3(-38.0, -32.0, 0.0)
-	sun.light_energy = 1.45
+	# Soft daylight comes from the window side. The fill light keeps the arm joints
+	# readable without making the room look like a debug scene.
+	sun.rotation_degrees = Vector3(-42.0, -18.0, 0.0)
+	sun.light_energy = 1.18
+	sun.shadow_enabled = true
 
-	fill_light.position = Vector3(-2.3, 2.7, -2.4)
-	fill_light.light_energy = 1.05
-	fill_light.omni_range = 6.0
+	fill_light.position = Vector3(1.8, 1.9, -1.15)
+	fill_light.light_energy = 0.52
+	fill_light.omni_range = 5.0
 
 
 func _build_scene_environment() -> void:
-	if has_node("DemoEnvironment"):
+	if has_node("RoomRoot"):
 		return
 
 	var root: Node3D = Node3D.new()
-	root.name = "DemoEnvironment"
+	root.name = "RoomRoot"
 	add_child(root)
+	move_child(root, 0)
 
-	var desk_material: StandardMaterial3D = _make_env_material(Color(0.43, 0.31, 0.21), 0.12)
-	var wall_material: StandardMaterial3D = _make_env_material(Color(0.30, 0.33, 0.36), 0.05)
-	var floor_material: StandardMaterial3D = _make_env_material(Color(0.18, 0.19, 0.20), 0.05)
-	var trim_material: StandardMaterial3D = _make_env_material(Color(0.18, 0.20, 0.22), 0.08)
-	var glass_material: StandardMaterial3D = _make_env_material(Color(0.28, 0.43, 0.62), 0.25)
-	var accent_material: StandardMaterial3D = _make_env_material(Color(0.62, 0.50, 0.34), 0.18)
+	var wall_material: StandardMaterial3D = _make_env_material(Color(0.86, 0.85, 0.81), 0.62)
+	var ceiling_material: StandardMaterial3D = _make_env_material(Color(0.78, 0.78, 0.75), 0.68)
+	var floor_material: StandardMaterial3D = _make_env_material(Color(0.36, 0.34, 0.30), 0.70)
+	var trim_material: StandardMaterial3D = _make_env_material(Color(0.48, 0.48, 0.45), 0.54)
+	var dark_frame_material: StandardMaterial3D = _make_env_material(Color(0.16, 0.17, 0.16), 0.42)
+	var sky_material: StandardMaterial3D = _make_env_material(Color(0.70, 0.84, 0.98), 0.95)
+	var glass_material: StandardMaterial3D = _make_translucent_env_material(Color(0.74, 0.88, 1.0, 0.30), 0.18)
+	var wood_material: StandardMaterial3D = _make_env_material(Color(0.70, 0.52, 0.34), 0.47)
+	var wood_dark_material: StandardMaterial3D = _make_env_material(Color(0.47, 0.33, 0.20), 0.55)
+	var wood_light_material: StandardMaterial3D = _make_env_material(Color(0.78, 0.61, 0.41), 0.50)
+	var building_material: StandardMaterial3D = _make_env_material(Color(0.66, 0.69, 0.70), 0.75)
+	var distant_building_material: StandardMaterial3D = _make_env_material(Color(0.78, 0.80, 0.80), 0.80)
+	var tree_material: StandardMaterial3D = _make_env_material(Color(0.38, 0.58, 0.32), 0.82)
+	var tree_light_material: StandardMaterial3D = _make_env_material(Color(0.50, 0.68, 0.40), 0.86)
+	var handle_material: StandardMaterial3D = _make_env_material(Color(0.06, 0.055, 0.045), 0.42)
 
-	root.add_child(_box_mesh("DeskSurface", Vector3(3.6, 0.08, 2.25), Vector3(0.0, -0.04, 0.05), desk_material))
-	root.add_child(_box_mesh("DeskFrontLip", Vector3(3.7, 0.12, 0.06), Vector3(0.0, -0.03, -1.10), trim_material))
-	root.add_child(_box_mesh("BackWall", Vector3(4.6, 2.4, 0.08), Vector3(0.0, 1.15, 1.18), wall_material))
-	root.add_child(_box_mesh("FloorShadowPlane", Vector3(4.7, 0.05, 3.4), Vector3(0.0, -0.09, 0.25), floor_material))
+	_build_room_shell(root, wall_material, ceiling_material, floor_material, trim_material)
+	_build_reference_desk(root, wood_material, wood_dark_material, wood_light_material, handle_material)
+	_build_large_window(root, dark_frame_material, sky_material, glass_material)
+	_build_outdoor_silhouette(root, building_material, distant_building_material, tree_material, tree_light_material)
+	_add_daylight_fill(root)
+	_add_world_environment()
 
-	# Lightweight room cues: a small window and shelf behind the lamp keep the
-	# scene readable without adding imported assets or physics cost.
-	root.add_child(_box_mesh("WindowGlass", Vector3(0.88, 0.58, 0.025), Vector3(-1.18, 1.45, 1.125), glass_material))
-	root.add_child(_box_mesh("WindowTop", Vector3(0.98, 0.045, 0.04), Vector3(-1.18, 1.765, 1.095), trim_material))
-	root.add_child(_box_mesh("WindowBottom", Vector3(0.98, 0.045, 0.04), Vector3(-1.18, 1.135, 1.095), trim_material))
-	root.add_child(_box_mesh("WindowLeft", Vector3(0.045, 0.64, 0.04), Vector3(-1.69, 1.45, 1.095), trim_material))
-	root.add_child(_box_mesh("WindowRight", Vector3(0.045, 0.64, 0.04), Vector3(-0.67, 1.45, 1.095), trim_material))
-	root.add_child(_box_mesh("BackShelf", Vector3(1.15, 0.07, 0.18), Vector3(1.05, 0.88, 1.02), accent_material))
-	root.add_child(_box_mesh("SmallBookA", Vector3(0.10, 0.28, 0.16), Vector3(0.72, 1.04, 0.90), trim_material))
-	root.add_child(_box_mesh("SmallBookB", Vector3(0.10, 0.22, 0.16), Vector3(0.86, 1.01, 0.90), glass_material))
 
+func _build_room_shell(root: Node3D, wall_material: Material, ceiling_material: Material, floor_material: Material, trim_material: Material) -> void:
+	root.add_child(_box_mesh("BackWall", Vector3(6.8, 3.1, 0.10), Vector3(0.0, 1.02, 1.42), wall_material))
+	root.add_child(_box_mesh("LeftWall", Vector3(0.10, 3.1, 3.45), Vector3(-3.35, 1.02, -0.25), wall_material))
+	root.add_child(_box_mesh("Ceiling", Vector3(6.9, 0.08, 3.55), Vector3(0.0, 2.60, -0.25), ceiling_material))
+	root.add_child(_box_mesh("Floor", Vector3(6.9, 0.08, 3.55), Vector3(0.0, -0.62, -0.25), floor_material))
+	root.add_child(_box_mesh("BackBaseboard", Vector3(6.75, 0.08, 0.08), Vector3(0.0, -0.18, 1.34), trim_material))
+	root.add_child(_box_mesh("LeftBaseboard", Vector3(0.09, 0.08, 3.45), Vector3(-3.29, -0.18, -0.25), trim_material))
+	root.add_child(_box_mesh("LeftBackCornerTrim", Vector3(0.08, 3.05, 0.08), Vector3(-3.29, 1.02, 1.34), trim_material))
+
+
+func _build_reference_desk(root: Node3D, wood_material: Material, wood_dark_material: Material, wood_light_material: Material, handle_material: Material) -> void:
+	# Tabletop top surface is y=0.0 so the existing lamp rig can sit on it without
+	# changing animation joint offsets.
+	root.add_child(_box_mesh("WideWoodTabletop", Vector3(6.55, 0.16, 2.75), Vector3(0.0, -0.08, -0.30), wood_material))
+	root.add_child(_box_mesh("TableFrontThickEdge", Vector3(6.62, 0.20, 0.12), Vector3(0.0, -0.20, -1.70), wood_dark_material))
+	root.add_child(_box_mesh("TableRightSideEdge", Vector3(0.14, 0.18, 2.76), Vector3(3.22, -0.19, -0.30), wood_dark_material))
+	root.add_child(_box_mesh("LeftDeskSidePanel", Vector3(0.18, 0.86, 1.82), Vector3(-2.90, -0.58, -0.52), wood_dark_material))
+	root.add_child(_box_mesh("RightDeskSidePanel", Vector3(0.18, 0.86, 1.70), Vector3(3.03, -0.58, -0.62), wood_dark_material))
+	root.add_child(_box_mesh("RearSupportPanel", Vector3(5.80, 0.52, 0.12), Vector3(0.02, -0.58, 0.86), wood_dark_material))
+	root.add_child(_box_mesh("RightDrawerBlock", Vector3(1.35, 0.56, 0.13), Vector3(1.70, -0.58, -1.50), wood_material))
+	root.add_child(_box_mesh("RightDrawerTopLine", Vector3(1.32, 0.035, 0.145), Vector3(1.70, -0.31, -1.585), wood_light_material))
+	root.add_child(_box_mesh("RightDrawerHandle", Vector3(0.38, 0.08, 0.04), Vector3(1.70, -0.58, -1.61), handle_material))
+	_add_table_grain(root, wood_light_material, wood_dark_material)
+
+
+func _add_table_grain(root: Node3D, light_material: Material, dark_material: Material) -> void:
+	var z_values: Array[float] = [-1.34, -1.06, -0.78, -0.51, -0.24, 0.03, 0.30, 0.58, 0.86]
+	for index: int in range(z_values.size()):
+		var z_value: float = z_values[index]
+		var x_offset: float = -0.55 + float(index % 4) * 0.34
+		var length: float = 4.8 + float(index % 3) * 0.35
+		var grain_material: Material = light_material if index % 2 == 0 else dark_material
+		root.add_child(_box_mesh("TabletopGrain_%02d" % index, Vector3(length, 0.006, 0.012), Vector3(x_offset, 0.004, z_value), grain_material))
+
+
+func _build_large_window(root: Node3D, frame_material: Material, sky_material: Material, glass_material: Material) -> void:
+	# The window fills most of the back wall and stays behind the lamp, matching the
+	# reference image scale ratio without importing any external texture assets.
+	root.add_child(_box_mesh("WindowSkyPanel", Vector3(4.72, 1.58, 0.035), Vector3(0.17, 1.47, 1.235), sky_material))
+	root.add_child(_box_mesh("WindowGlassOverlay", Vector3(4.68, 1.54, 0.020), Vector3(0.17, 1.47, 1.205), glass_material))
+	root.add_child(_box_mesh("WindowTopFrame", Vector3(5.08, 0.12, 0.13), Vector3(0.17, 2.31, 1.185), frame_material))
+	root.add_child(_box_mesh("WindowBottomFrame", Vector3(5.08, 0.12, 0.13), Vector3(0.17, 0.63, 1.185), frame_material))
+	root.add_child(_box_mesh("WindowLeftFrame", Vector3(0.13, 1.80, 0.13), Vector3(-2.43, 1.47, 1.185), frame_material))
+	root.add_child(_box_mesh("WindowRightFrame", Vector3(0.13, 1.80, 0.13), Vector3(2.77, 1.47, 1.185), frame_material))
+	root.add_child(_box_mesh("WindowInnerTopShadow", Vector3(4.82, 0.045, 0.10), Vector3(0.17, 2.16, 1.145), frame_material))
+	root.add_child(_box_mesh("WindowSill", Vector3(5.18, 0.10, 0.28), Vector3(0.17, 0.53, 1.06), frame_material))
+
+
+func _build_outdoor_silhouette(root: Node3D, building_material: Material, distant_building_material: Material, tree_material: Material, tree_light_material: Material) -> void:
+	# Stylized flat scenery placed just in front of the sky panel. It reads as city
+	# and tree silhouettes through the large window while remaining cheap to render.
+	root.add_child(_box_mesh("CityBlock_00", Vector3(0.30, 0.34, 0.045), Vector3(-2.02, 0.90, 1.165), distant_building_material))
+	root.add_child(_box_mesh("CityBlock_01", Vector3(0.24, 0.56, 0.045), Vector3(-1.62, 1.00, 1.165), building_material))
+	root.add_child(_box_mesh("CityBlock_02", Vector3(0.38, 0.28, 0.045), Vector3(-1.15, 0.86, 1.165), distant_building_material))
+	root.add_child(_box_mesh("CityBlock_03", Vector3(0.26, 0.44, 0.045), Vector3(-0.57, 0.95, 1.165), building_material))
+	root.add_child(_box_mesh("CityBlock_04", Vector3(0.42, 0.25, 0.045), Vector3(-0.10, 0.84, 1.165), distant_building_material))
+	root.add_child(_box_mesh("CityBlock_05", Vector3(0.32, 0.48, 0.045), Vector3(0.43, 0.96, 1.165), building_material))
+	root.add_child(_box_mesh("CityBlock_06", Vector3(0.24, 0.32, 0.045), Vector3(0.95, 0.88, 1.165), distant_building_material))
+	root.add_child(_box_mesh("CityBlock_07", Vector3(0.36, 0.40, 0.045), Vector3(1.44, 0.93, 1.165), building_material))
+	root.add_child(_box_mesh("CityBlock_08", Vector3(0.32, 0.27, 0.045), Vector3(1.94, 0.86, 1.165), distant_building_material))
+	root.add_child(_box_mesh("CityBlock_09", Vector3(0.26, 0.38, 0.045), Vector3(2.35, 0.92, 1.165), building_material))
+	root.add_child(_box_mesh("TreeBandBack", Vector3(4.45, 0.16, 0.045), Vector3(0.23, 0.69, 1.145), tree_light_material))
+	root.add_child(_box_mesh("TreeBandFront", Vector3(4.55, 0.12, 0.050), Vector3(0.22, 0.61, 1.125), tree_material))
+	_add_window_tree(root, "TreeBlob_00", -2.05, 0.73, 0.16, Vector3(1.10, 0.70, 0.25), tree_material)
+	_add_window_tree(root, "TreeBlob_01", -1.64, 0.72, 0.15, Vector3(1.00, 0.66, 0.25), tree_light_material)
+	_add_window_tree(root, "TreeBlob_02", -1.18, 0.74, 0.17, Vector3(1.20, 0.72, 0.25), tree_material)
+	_add_window_tree(root, "TreeBlob_03", -0.66, 0.70, 0.14, Vector3(1.00, 0.68, 0.25), tree_light_material)
+	_add_window_tree(root, "TreeBlob_04", -0.12, 0.73, 0.17, Vector3(1.22, 0.72, 0.25), tree_material)
+	_add_window_tree(root, "TreeBlob_05", 0.42, 0.70, 0.14, Vector3(1.00, 0.65, 0.25), tree_light_material)
+	_add_window_tree(root, "TreeBlob_06", 0.94, 0.73, 0.16, Vector3(1.18, 0.70, 0.25), tree_material)
+	_add_window_tree(root, "TreeBlob_07", 1.46, 0.71, 0.15, Vector3(1.05, 0.66, 0.25), tree_light_material)
+	_add_window_tree(root, "TreeBlob_08", 2.00, 0.73, 0.16, Vector3(1.15, 0.68, 0.25), tree_material)
+	_add_window_tree(root, "TreeBlob_09", 2.42, 0.69, 0.13, Vector3(1.00, 0.65, 0.25), tree_light_material)
+
+
+func _add_window_tree(root: Node3D, node_name: String, x_pos: float, y_pos: float, radius: float, scale_vec: Vector3, material: Material) -> void:
+	var tree: MeshInstance3D = _low_poly_sphere_mesh(node_name, radius, Vector3(x_pos, y_pos, 1.105), scale_vec, material)
+	root.add_child(tree)
+
+
+func _add_daylight_fill(root: Node3D) -> void:
+	var window_light: OmniLight3D = OmniLight3D.new()
+	window_light.name = "WindowSoftDaylight"
+	window_light.position = Vector3(-0.35, 1.88, 0.88)
+	window_light.light_energy = 0.46
+	window_light.omni_range = 4.2
+	root.add_child(window_light)
+
+	var tabletop_fill: OmniLight3D = OmniLight3D.new()
+	tabletop_fill.name = "TabletopWarmBounce"
+	tabletop_fill.position = Vector3(1.25, 0.62, -1.25)
+	tabletop_fill.light_color = Color(1.0, 0.86, 0.68)
+	tabletop_fill.light_energy = 0.18
+	tabletop_fill.omni_range = 3.5
+	root.add_child(tabletop_fill)
+
+
+func _add_world_environment() -> void:
+	if has_node("SoftAmbientWorld"):
+		return
 	var world: WorldEnvironment = WorldEnvironment.new()
 	world.name = "SoftAmbientWorld"
 	var env: Environment = Environment.new()
 	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color(0.09, 0.10, 0.12)
+	env.background_color = Color(0.78, 0.83, 0.88)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.72, 0.67, 0.58)
-	env.ambient_light_energy = 0.35
+	env.ambient_light_color = Color(0.82, 0.80, 0.74)
+	env.ambient_light_energy = 0.44
+	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	env.tonemap_exposure = 1.0
+	env.tonemap_white = 1.0
 	world.environment = env
 	add_child(world)
 
@@ -121,50 +230,53 @@ func _build_debug_panel(canvas: CanvasLayer) -> void:
 	var panel: PanelContainer = PanelContainer.new()
 	panel.name = "DebugPanel"
 	panel.position = Vector2(12.0, 12.0)
-	panel.custom_minimum_size = Vector2(440.0, 292.0)
+	panel.custom_minimum_size = Vector2(355.0, 224.0)
 	canvas.add_child(panel)
 
 	var margin: MarginContainer = MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 10)
-	margin.add_theme_constant_override("margin_top", 8)
-	margin.add_theme_constant_override("margin_right", 10)
-	margin.add_theme_constant_override("margin_bottom", 8)
+	margin.add_theme_constant_override("margin_left", 8)
+	margin.add_theme_constant_override("margin_top", 7)
+	margin.add_theme_constant_override("margin_right", 8)
+	margin.add_theme_constant_override("margin_bottom", 7)
 	panel.add_child(margin)
 
 	_debug_label = Label.new()
 	_debug_label.name = "DebugLabel"
 	_debug_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_debug_label.add_theme_font_size_override("font_size", 12)
 	margin.add_child(_debug_label)
 
 
 func _build_response_panel(canvas: CanvasLayer) -> void:
 	_response_panel = PanelContainer.new()
 	_response_panel.name = "RecallResponsePanel"
-	_response_panel.position = Vector2(450.0, 12.0)
-	_response_panel.custom_minimum_size = Vector2(570.0, 165.0)
+	_response_panel.position = Vector2(390.0, 12.0)
+	_response_panel.custom_minimum_size = Vector2(500.0, 132.0)
 	_response_panel.visible = false
 	canvas.add_child(_response_panel)
 
 	var margin: MarginContainer = MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 16)
-	margin.add_theme_constant_override("margin_top", 12)
-	margin.add_theme_constant_override("margin_right", 16)
-	margin.add_theme_constant_override("margin_bottom", 12)
+	margin.add_theme_constant_override("margin_left", 14)
+	margin.add_theme_constant_override("margin_top", 10)
+	margin.add_theme_constant_override("margin_right", 14)
+	margin.add_theme_constant_override("margin_bottom", 10)
 	_response_panel.add_child(margin)
 
 	var vbox: VBoxContainer = VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 8)
+	vbox.add_theme_constant_override("separation", 6)
 	margin.add_child(vbox)
 
 	var title: Label = Label.new()
 	title.text = "LeLamp recall answer"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	title.add_theme_font_size_override("font_size", 14)
 	vbox.add_child(title)
 
 	_response_label = Label.new()
 	_response_label.name = "RecallResponseLabel"
 	_response_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_response_label.text = ""
+	_response_label.add_theme_font_size_override("font_size", 14)
 	vbox.add_child(_response_label)
 
 
@@ -248,26 +360,18 @@ func _refresh_debug_ui() -> void:
 	var face_y_text: String = _optional_debug_value(engagement.get("face_y_norm", null))
 
 	var lines: Array[String] = []
-	lines.append("LeLamp Milestone 4.3.3 Frontend")
-	lines.append("UDP commands: %s" % _receiver_status)
-	lines.append("Text input: browser chat at http://127.0.0.1:8765")
+	lines.append("LeLamp Milestone 4.3.3 Scene Polish")
+	lines.append("UDP: %s" % _receiver_status)
+	lines.append("Browser chat: http://127.0.0.1:8765")
 	lines.append("Health: %s  age: %.1fs" % [connection_health, packet_age_s])
-	lines.append("Backend stale sleep: %s" % ("yes" if _sleeping_due_to_stale else "no"))
-	lines.append("View: front-three-quarter / local -Z")
 	lines.append("State: %s" % str(_last_command.get("state", "unknown")))
-	lines.append("Motion: %s" % str(behavior.get("motion", "none")))
-	lines.append("Light: %s" % str(behavior.get("light", "none")))
-	lines.append("Sound: %s" % str(behavior.get("sound", "none")))
-	lines.append("Speech: %s" % speech_text)
-	lines.append("Engagement: %s  confidence: %.2f" % [
-		str(engagement.get("status", "unknown")),
-		float(engagement.get("confidence", 0.0))
-	])
+	lines.append("Motion: %s  Light: %s" % [str(behavior.get("motion", "none")), str(behavior.get("light", "none"))])
+	lines.append("Engagement: %s  %.2f" % [str(engagement.get("status", "unknown")), float(engagement.get("confidence", 0.0))])
 	lines.append("Reason: %s" % str(engagement.get("reason", "none")))
-	lines.append("Face follow hint: x=%s  y=%s" % [face_x_text, face_y_text])
-	lines.append("Packet timestamp: %s" % str(_last_command.get("timestamp", "never")))
-	lines.append("Local received: %s" % _last_packet_local_time)
+	lines.append("Face hint: x=%s  y=%s" % [face_x_text, face_y_text])
 	lines.append("Recall panel: %s" % ("visible" if _response_panel != null and _response_panel.visible else "hidden"))
+	if speech_text != "":
+		lines.append("Speech: %s" % speech_text)
 
 	var debug_text: String = ""
 	for line: String in lines:
@@ -295,8 +399,32 @@ func _box_mesh(node_name: String, size: Vector3, position: Vector3, material: Ma
 	return instance
 
 
+func _low_poly_sphere_mesh(node_name: String, radius: float, position: Vector3, scale_vec: Vector3, material: Material) -> MeshInstance3D:
+	var instance: MeshInstance3D = MeshInstance3D.new()
+	instance.name = node_name
+	var mesh: SphereMesh = SphereMesh.new()
+	mesh.radius = radius
+	mesh.height = radius * 2.0
+	mesh.radial_segments = 8
+	mesh.rings = 4
+	instance.mesh = mesh
+	instance.position = position
+	instance.scale = scale_vec
+	instance.material_override = material
+	return instance
+
+
 func _make_env_material(color: Color, roughness: float) -> StandardMaterial3D:
 	var mat: StandardMaterial3D = StandardMaterial3D.new()
+	mat.albedo_color = color
+	mat.roughness = clampf(roughness, 0.0, 1.0)
+	mat.metallic = 0.0
+	return mat
+
+
+func _make_translucent_env_material(color: Color, roughness: float) -> StandardMaterial3D:
+	var mat: StandardMaterial3D = StandardMaterial3D.new()
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.albedo_color = color
 	mat.roughness = clampf(roughness, 0.0, 1.0)
 	return mat

@@ -10,7 +10,7 @@ Use Godot 4.6.3 stable or newer Godot 4.x stable. The project uses basic Godot 4
 
 ## Milestone 4.3.3 expressive polish
 
-Milestone 4.3.3 keeps Godot as a bounded animation/display layer while making the demo read more like a social robotic lamp. The default scene now includes a lightweight desk, wall, window, shelf, soft ambient light, and a front-three-quarter camera. The lamp head and visible light cone still point along the rig's local `-Z` axis.
+Milestone 4.3.3 keeps Godot as a bounded animation/display layer while making the demo read more like the reference image: a large wooden desk dominates the foreground, a wide horizontal window fills the back wall, and a smaller robotic lamp sits on the tabletop in front of the window. The camera is now placed near the right/front table corner, looking diagonally across the desk. The lamp head and visible light cone still point along the rig's local `-Z` axis, and the whole lamp rig is only scaled/rotated as a display object.
 
 The 6-DOF animation axes are unchanged. The polish is procedural motion, camera placement, lighting, and simple primitive scene geometry. No imported model, voice input, perception logic, memory logic, or new AI dependency was added to Godot.
 
@@ -46,7 +46,7 @@ Runtime-created UI:
 
 ```text
 Main
-├── DemoEnvironment (runtime primitive desk/room backdrop)
+├── RoomRoot (runtime primitive room/table/window/backdrop)
 └── LeLampCanvas (CanvasLayer)
     ├── DebugPanel (PanelContainer)
     │   └── DebugLabel (Label)
@@ -156,7 +156,13 @@ Expected result: the debug panel cycles through `idle`, `engaged`, `disengaged`,
 Start Godot first, then run this from the project root:
 
 ```powershell
-python -m backend.main --show-window --godot-udp --godot-host 127.0.0.1 --godot-port 4242 --enable-objects --object-model yolov8n.pt --save-object-frames --interactive-recall --memory-db data/scene_memory.sqlite
+python -m backend.main --godot-udp --enable-objects --enable-web-chat --use-llm --ollama-url http://10.0.0.70:11434 --ollama-model qwen2.5:1.5b --llm-timeout 90 --llm-connect-timeout 5 --show-window
+```
+
+Open browser chat at:
+
+```text
+http://127.0.0.1:8765
 ```
 
 The backend writes isolated logs under `logs/runs/<run_id>/` and mirrors the latest run to `logs/latest/` unless `--no-latest` is used.
@@ -168,7 +174,8 @@ Included:
 - UDP receive loop in Godot.
 - Primitive 6-DOF lamp rig.
 - Controlled placeholder motion and light animations.
-- Front-three-quarter demo camera.
+- Reference-image-inspired room, large table, wide window, and stylized outdoor skyline.
+- Front/right table-corner demo camera.
 - Visible front/look marker and light cone.
 - Visible debug UI.
 - Visible recall response panel.
