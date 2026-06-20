@@ -1,6 +1,185 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=18 format=3]
 
 [ext_resource type="Script" path="res://scripts/LampController.gd" id="1_lamp_controller"]
 
+[sub_resource type="StandardMaterial3D" id="mat_base"]
+albedo_color = Color(0.34, 0.34, 0.36, 1)
+roughness = 0.55
+metallic = 0.0
+
+[sub_resource type="StandardMaterial3D" id="mat_arm"]
+albedo_color = Color(0.72, 0.72, 0.76, 1)
+roughness = 0.5
+metallic = 0.0
+
+[sub_resource type="StandardMaterial3D" id="mat_head_preview"]
+albedo_color = Color(1, 0.86, 0.48, 1)
+roughness = 0.42
+metallic = 0.0
+emission_enabled = true
+emission = Color(1, 0.86, 0.48, 1)
+emission_energy_multiplier = 0.6
+
+[sub_resource type="StandardMaterial3D" id="mat_cone_preview"]
+transparency = 1
+shading_mode = 0
+albedo_color = Color(1, 0.82, 0.3, 0.18)
+roughness = 0.3
+metallic = 0.0
+
+[sub_resource type="StandardMaterial3D" id="mat_marker_preview"]
+albedo_color = Color(0.15, 0.45, 1, 1)
+roughness = 0.42
+metallic = 0.0
+emission_enabled = true
+emission = Color(0.15, 0.45, 1, 1)
+emission_energy_multiplier = 0.6
+
+[sub_resource type="CylinderMesh" id="mesh_Base"]
+top_radius = 0.42
+bottom_radius = 0.42
+height = 0.18
+radial_segments = 32
+
+[sub_resource type="SphereMesh" id="mesh_ShoulderJoint"]
+radius = 0.15
+height = 0.3
+radial_segments = 32
+rings = 16
+
+[sub_resource type="CylinderMesh" id="mesh_UpperArm"]
+top_radius = 0.055
+bottom_radius = 0.055
+height = 1.15
+radial_segments = 32
+
+[sub_resource type="SphereMesh" id="mesh_ElbowJoint"]
+radius = 0.13
+height = 0.26
+radial_segments = 32
+rings = 16
+
+[sub_resource type="CylinderMesh" id="mesh_LowerArm"]
+top_radius = 0.05
+bottom_radius = 0.05
+height = 0.9
+radial_segments = 32
+
+[sub_resource type="SphereMesh" id="mesh_WristPitchJoint"]
+radius = 0.105
+height = 0.21
+radial_segments = 32
+rings = 16
+
+[sub_resource type="SphereMesh" id="mesh_LampHead"]
+radius = 0.22
+height = 0.44
+radial_segments = 32
+rings = 16
+
+[sub_resource type="CylinderMesh" id="mesh_LampShade"]
+top_radius = 0.22
+bottom_radius = 0.22
+height = 0.18
+radial_segments = 32
+
+[sub_resource type="CylinderMesh" id="mesh_VisibleLightCone"]
+top_radius = 0.06
+bottom_radius = 0.24
+height = 1.1
+radial_segments = 32
+
+[sub_resource type="CylinderMesh" id="mesh_FrontLookMarker"]
+top_radius = 0.07
+bottom_radius = 0.07
+height = 0.018
+radial_segments = 32
+
+[sub_resource type="SphereMesh" id="mesh_LookDirectionTip"]
+radius = 0.045
+height = 0.09
+radial_segments = 32
+rings = 16
+
 [node name="LampRig" type="Node3D"]
 script = ExtResource("1_lamp_controller")
+
+[node name="BaseYaw_DOF1" type="Node3D" parent="."]
+position = Vector3(0, 0, 0)
+
+[node name="Base" type="MeshInstance3D" parent="BaseYaw_DOF1"]
+mesh = SubResource("mesh_Base")
+material_override = SubResource("mat_base")
+position = Vector3(0, 0.09, 0)
+
+[node name="ShoulderPitch_DOF2" type="Node3D" parent="BaseYaw_DOF1"]
+position = Vector3(0, 0.24, 0)
+
+[node name="ShoulderJoint" type="MeshInstance3D" parent="BaseYaw_DOF1/ShoulderPitch_DOF2"]
+mesh = SubResource("mesh_ShoulderJoint")
+material_override = SubResource("mat_base")
+
+[node name="UpperArm" type="MeshInstance3D" parent="BaseYaw_DOF1/ShoulderPitch_DOF2"]
+mesh = SubResource("mesh_UpperArm")
+material_override = SubResource("mat_arm")
+position = Vector3(0, 0.575, 0)
+
+[node name="ElbowPitch_DOF3" type="Node3D" parent="BaseYaw_DOF1/ShoulderPitch_DOF2"]
+position = Vector3(0, 1.15, 0)
+
+[node name="ElbowJoint" type="MeshInstance3D" parent="BaseYaw_DOF1/ShoulderPitch_DOF2/ElbowPitch_DOF3"]
+mesh = SubResource("mesh_ElbowJoint")
+material_override = SubResource("mat_base")
+
+[node name="LowerArm" type="MeshInstance3D" parent="BaseYaw_DOF1/ShoulderPitch_DOF2/ElbowPitch_DOF3"]
+mesh = SubResource("mesh_LowerArm")
+material_override = SubResource("mat_arm")
+position = Vector3(0, 0.45, 0)
+
+[node name="WristPitch_DOF4" type="Node3D" parent="BaseYaw_DOF1/ShoulderPitch_DOF2/ElbowPitch_DOF3"]
+position = Vector3(0, 0.9, 0)
+
+[node name="WristPitchJoint" type="MeshInstance3D" parent="BaseYaw_DOF1/ShoulderPitch_DOF2/ElbowPitch_DOF3/WristPitch_DOF4"]
+mesh = SubResource("mesh_WristPitchJoint")
+material_override = SubResource("mat_base")
+
+[node name="WristYaw_DOF5" type="Node3D" parent="BaseYaw_DOF1/ShoulderPitch_DOF2/ElbowPitch_DOF3/WristPitch_DOF4"]
+
+[node name="LampHeadTilt_DOF6" type="Node3D" parent="BaseYaw_DOF1/ShoulderPitch_DOF2/ElbowPitch_DOF3/WristPitch_DOF4/WristYaw_DOF5"]
+position = Vector3(0, 0.16, -0.08)
+
+[node name="LampHead" type="MeshInstance3D" parent="BaseYaw_DOF1/ShoulderPitch_DOF2/ElbowPitch_DOF3/WristPitch_DOF4/WristYaw_DOF5/LampHeadTilt_DOF6"]
+mesh = SubResource("mesh_LampHead")
+material_override = SubResource("mat_head_preview")
+scale = Vector3(1.15, 0.82, 1)
+
+[node name="LampShade" type="MeshInstance3D" parent="BaseYaw_DOF1/ShoulderPitch_DOF2/ElbowPitch_DOF3/WristPitch_DOF4/WristYaw_DOF5/LampHeadTilt_DOF6"]
+mesh = SubResource("mesh_LampShade")
+material_override = SubResource("mat_head_preview")
+position = Vector3(0, -0.02, -0.16)
+rotation = Vector3(1.5708, 0, 0)
+
+[node name="LampSpotLight" type="SpotLight3D" parent="BaseYaw_DOF1/ShoulderPitch_DOF2/ElbowPitch_DOF3/WristPitch_DOF4/WristYaw_DOF5/LampHeadTilt_DOF6"]
+position = Vector3(0, -0.02, -0.25)
+rotation = Vector3(-1.5708, 0, 0)
+light_color = Color(1, 0.86, 0.48, 1)
+light_energy = 1.4
+spot_range = 4.0
+spot_angle = 28.0
+
+[node name="VisibleLightCone" type="MeshInstance3D" parent="BaseYaw_DOF1/ShoulderPitch_DOF2/ElbowPitch_DOF3/WristPitch_DOF4/WristYaw_DOF5/LampHeadTilt_DOF6"]
+mesh = SubResource("mesh_VisibleLightCone")
+material_override = SubResource("mat_cone_preview")
+position = Vector3(0, -0.02, -0.62)
+rotation = Vector3(1.5708, 0, 0)
+
+[node name="FrontLookMarker" type="MeshInstance3D" parent="BaseYaw_DOF1/ShoulderPitch_DOF2/ElbowPitch_DOF3/WristPitch_DOF4/WristYaw_DOF5/LampHeadTilt_DOF6"]
+mesh = SubResource("mesh_FrontLookMarker")
+material_override = SubResource("mat_marker_preview")
+position = Vector3(0, -0.02, -0.275)
+rotation = Vector3(1.5708, 0, 0)
+
+[node name="LookDirectionTip" type="MeshInstance3D" parent="BaseYaw_DOF1/ShoulderPitch_DOF2/ElbowPitch_DOF3/WristPitch_DOF4/WristYaw_DOF5/LampHeadTilt_DOF6"]
+mesh = SubResource("mesh_LookDirectionTip")
+material_override = SubResource("mat_marker_preview")
+position = Vector3(0, -0.02, -0.43)

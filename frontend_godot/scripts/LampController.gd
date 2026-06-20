@@ -4,13 +4,19 @@ const DEG: float = PI / 180.0
 const FACE_FOLLOW_MAX_DEG: float = 14.0
 const FACE_FOLLOW_SMOOTH_SPEED: float = 4.0
 
-var base_yaw: Node3D
-var shoulder_pitch: Node3D
-var elbow_pitch: Node3D
-var wrist_pitch: Node3D
-var wrist_yaw: Node3D
-var lamp_head_tilt: Node3D
-var spot_light: SpotLight3D
+@onready var base_yaw: Node3D = $BaseYaw_DOF1
+@onready var shoulder_pitch: Node3D = $BaseYaw_DOF1/ShoulderPitch_DOF2
+@onready var elbow_pitch: Node3D = $BaseYaw_DOF1/ShoulderPitch_DOF2/ElbowPitch_DOF3
+@onready var wrist_pitch: Node3D = $BaseYaw_DOF1/ShoulderPitch_DOF2/ElbowPitch_DOF3/WristPitch_DOF4
+@onready var wrist_yaw: Node3D = $BaseYaw_DOF1/ShoulderPitch_DOF2/ElbowPitch_DOF3/WristPitch_DOF4/WristYaw_DOF5
+@onready var lamp_head_tilt: Node3D = $BaseYaw_DOF1/ShoulderPitch_DOF2/ElbowPitch_DOF3/WristPitch_DOF4/WristYaw_DOF5/LampHeadTilt_DOF6
+@onready var spot_light: SpotLight3D = $BaseYaw_DOF1/ShoulderPitch_DOF2/ElbowPitch_DOF3/WristPitch_DOF4/WristYaw_DOF5/LampHeadTilt_DOF6/LampSpotLight
+@onready var head_mesh: MeshInstance3D = $BaseYaw_DOF1/ShoulderPitch_DOF2/ElbowPitch_DOF3/WristPitch_DOF4/WristYaw_DOF5/LampHeadTilt_DOF6/LampHead
+@onready var shade_mesh: MeshInstance3D = $BaseYaw_DOF1/ShoulderPitch_DOF2/ElbowPitch_DOF3/WristPitch_DOF4/WristYaw_DOF5/LampHeadTilt_DOF6/LampShade
+@onready var cone_mesh: MeshInstance3D = $BaseYaw_DOF1/ShoulderPitch_DOF2/ElbowPitch_DOF3/WristPitch_DOF4/WristYaw_DOF5/LampHeadTilt_DOF6/VisibleLightCone
+@onready var front_marker_mesh: MeshInstance3D = $BaseYaw_DOF1/ShoulderPitch_DOF2/ElbowPitch_DOF3/WristPitch_DOF4/WristYaw_DOF5/LampHeadTilt_DOF6/FrontLookMarker
+@onready var look_tip_mesh: MeshInstance3D = $BaseYaw_DOF1/ShoulderPitch_DOF2/ElbowPitch_DOF3/WristPitch_DOF4/WristYaw_DOF5/LampHeadTilt_DOF6/LookDirectionTip
+
 var head_material: StandardMaterial3D
 var cone_material: StandardMaterial3D
 var front_marker_material: StandardMaterial3D
@@ -38,13 +44,28 @@ var _target: Dictionary = {
 
 
 func _ready() -> void:
-	_build_lamp_rig()
+	_bind_runtime_materials()
 	apply_command({
 		"state": "idle",
 		"engagement": {"status": "absent", "confidence": 0.0},
 		"behavior": {"motion": "idle_breathe", "light": "dim_warm", "sound": null, "speech_text": null},
 		"memory": {"last_detected_objects": []},
 	})
+
+
+func _bind_runtime_materials() -> void:
+	# The geometry is now editor-authored in LampRig.tscn. Runtime code only binds
+	# mutable material instances for behavior-driven color/emission changes.
+	head_material = _make_material(Color(1.0, 0.86, 0.48), true)
+	cone_material = _make_transparent_material(Color(1.0, 0.82, 0.30, 0.18))
+	front_marker_material = _make_material(Color(0.15, 0.45, 1.0), true)
+
+	head_mesh.material_override = head_material
+	shade_mesh.material_override = head_material
+	cone_mesh.material_override = cone_material
+	front_marker_mesh.material_override = front_marker_material
+	look_tip_mesh.material_override = front_marker_material
+	spot_light.light_color = head_material.albedo_color
 
 
 func apply_command(command: Dictionary) -> void:
@@ -73,104 +94,6 @@ func _process(delta: float) -> void:
 	_update_motion_targets()
 	_smooth_to_targets(delta)
 	_update_light(delta)
-
-
-func _build_lamp_rig() -> void:
-	_clear_children()
-
-	var base_material: StandardMaterial3D = _make_material(Color(0.34, 0.34, 0.36), false)
-	var arm_material: StandardMaterial3D = _make_material(Color(0.72, 0.72, 0.76), false)
-	head_material = _make_material(Color(1.0, 0.86, 0.48), true)
-	cone_material = _make_transparent_material(Color(1.0, 0.82, 0.30, 0.18))
-	front_marker_material = _make_material(Color(0.15, 0.45, 1.0), true)
-
-	base_yaw = Node3D.new()
-	base_yaw.name = "BaseYaw_DOF1"
-	add_child(base_yaw)
-
-	var base_mesh: MeshInstance3D = _cylinder_mesh("Base", 0.42, 0.18, base_material)
-	base_mesh.position = Vector3(0.0, 0.09, 0.0)
-	base_yaw.add_child(base_mesh)
-
-	shoulder_pitch = Node3D.new()
-	shoulder_pitch.name = "ShoulderPitch_DOF2"
-	shoulder_pitch.position = Vector3(0.0, 0.24, 0.0)
-	base_yaw.add_child(shoulder_pitch)
-
-	var shoulder_joint: MeshInstance3D = _sphere_mesh("ShoulderJoint", 0.15, base_material)
-	shoulder_pitch.add_child(shoulder_joint)
-
-	var upper_arm: MeshInstance3D = _cylinder_mesh("UpperArm", 0.055, 1.15, arm_material)
-	upper_arm.position = Vector3(0.0, 0.575, 0.0)
-	shoulder_pitch.add_child(upper_arm)
-
-	elbow_pitch = Node3D.new()
-	elbow_pitch.name = "ElbowPitch_DOF3"
-	elbow_pitch.position = Vector3(0.0, 1.15, 0.0)
-	shoulder_pitch.add_child(elbow_pitch)
-
-	var elbow_joint: MeshInstance3D = _sphere_mesh("ElbowJoint", 0.13, base_material)
-	elbow_pitch.add_child(elbow_joint)
-
-	var lower_arm: MeshInstance3D = _cylinder_mesh("LowerArm", 0.05, 0.90, arm_material)
-	lower_arm.position = Vector3(0.0, 0.45, 0.0)
-	elbow_pitch.add_child(lower_arm)
-
-	wrist_pitch = Node3D.new()
-	wrist_pitch.name = "WristPitch_DOF4"
-	wrist_pitch.position = Vector3(0.0, 0.90, 0.0)
-	elbow_pitch.add_child(wrist_pitch)
-
-	var wrist_pitch_joint: MeshInstance3D = _sphere_mesh("WristPitchJoint", 0.105, base_material)
-	wrist_pitch.add_child(wrist_pitch_joint)
-
-	wrist_yaw = Node3D.new()
-	wrist_yaw.name = "WristYaw_DOF5"
-	wrist_pitch.add_child(wrist_yaw)
-
-	lamp_head_tilt = Node3D.new()
-	lamp_head_tilt.name = "LampHeadTilt_DOF6"
-	lamp_head_tilt.position = Vector3(0.0, 0.16, -0.08)
-	wrist_yaw.add_child(lamp_head_tilt)
-
-	var head: MeshInstance3D = _sphere_mesh("LampHead", 0.22, head_material)
-	head.scale = Vector3(1.15, 0.82, 1.0)
-	lamp_head_tilt.add_child(head)
-
-	var shade: MeshInstance3D = _cylinder_mesh("LampShade", 0.22, 0.18, head_material)
-	shade.rotation_degrees = Vector3(90.0, 0.0, 0.0)
-	shade.position = Vector3(0.0, -0.02, -0.16)
-	lamp_head_tilt.add_child(shade)
-
-	spot_light = SpotLight3D.new()
-	spot_light.name = "LampSpotLight"
-	spot_light.position = Vector3(0.0, -0.02, -0.25)
-	spot_light.rotation_degrees = Vector3(-90.0, 0.0, 0.0)
-	spot_light.spot_range = 4.0
-	spot_light.spot_angle = 28.0
-	spot_light.light_energy = 1.4
-	lamp_head_tilt.add_child(spot_light)
-
-	var cone: MeshInstance3D = _cone_mesh("VisibleLightCone", 0.24, 1.1, cone_material)
-	cone.position = Vector3(0.0, -0.02, -0.62)
-	cone.rotation_degrees = Vector3(90.0, 0.0, 0.0)
-	lamp_head_tilt.add_child(cone)
-
-	# Final-demo polish: this marker makes the lamp's local -Z/front side
-	# unambiguous from the camera view without changing the 6-DOF animation axes.
-	var front_lens_marker: MeshInstance3D = _cylinder_mesh("FrontLookMarker", 0.07, 0.018, front_marker_material)
-	front_lens_marker.position = Vector3(0.0, -0.02, -0.275)
-	front_lens_marker.rotation_degrees = Vector3(90.0, 0.0, 0.0)
-	lamp_head_tilt.add_child(front_lens_marker)
-
-	var look_tip: MeshInstance3D = _sphere_mesh("LookDirectionTip", 0.045, front_marker_material)
-	look_tip.position = Vector3(0.0, -0.02, -0.43)
-	lamp_head_tilt.add_child(look_tip)
-
-
-func _clear_children() -> void:
-	for child: Node in get_children():
-		child.queue_free()
 
 
 func _update_face_follow(delta: float) -> void:
@@ -310,46 +233,6 @@ func _dictionary_value(source: Dictionary, key: String) -> Dictionary:
 	if typeof(value) == TYPE_DICTIONARY:
 		return value as Dictionary
 	return {}
-
-
-func _cylinder_mesh(node_name: String, radius: float, height: float, material: Material) -> MeshInstance3D:
-	var instance: MeshInstance3D = MeshInstance3D.new()
-	instance.name = node_name
-	var mesh: CylinderMesh = CylinderMesh.new()
-	mesh.top_radius = radius
-	mesh.bottom_radius = radius
-	mesh.height = height
-	mesh.radial_segments = 32
-	instance.mesh = mesh
-	instance.material_override = material
-	return instance
-
-
-func _cone_mesh(node_name: String, radius: float, height: float, material: Material) -> MeshInstance3D:
-	var instance: MeshInstance3D = MeshInstance3D.new()
-	instance.name = node_name
-	var mesh: CylinderMesh = CylinderMesh.new()
-	mesh.top_radius = radius * 0.25
-	mesh.bottom_radius = radius
-	mesh.height = height
-	mesh.radial_segments = 32
-	instance.mesh = mesh
-	instance.material_override = material
-	return instance
-
-
-func _sphere_mesh(node_name: String, radius: float, material: Material) -> MeshInstance3D:
-	var instance: MeshInstance3D = MeshInstance3D.new()
-	instance.name = node_name
-	var mesh: SphereMesh = SphereMesh.new()
-	mesh.radius = radius
-	mesh.height = radius * 2.0
-	mesh.radial_segments = 32
-	mesh.rings = 16
-	instance.mesh = mesh
-	instance.material_override = material
-	return instance
-
 
 func _make_material(color: Color, emissive: bool) -> StandardMaterial3D:
 	var mat: StandardMaterial3D = StandardMaterial3D.new()

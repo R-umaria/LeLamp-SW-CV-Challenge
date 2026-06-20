@@ -10,7 +10,7 @@ config_version=5
 
 [application]
 
-config/name="LeLamp Milestone 4.3.3 Frontend"
+config/name="LeLamp Milestone 4.3.6 Editable Frontend"
 run/main_scene="res://scenes/Main.tscn"
 config/features=PackedStringArray("4.6")
 

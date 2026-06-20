@@ -1,22 +1,62 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene format=3 uid="uid://bnjnaq4pskfwd"]
 
-[ext_resource type="Script" path="res://scripts/Main.gd" id="1_main"]
-[ext_resource type="Script" path="res://scripts/UdpCommandReceiver.gd" id="2_udp"]
-[ext_resource type="PackedScene" path="res://scenes/LampRig.tscn" id="3_lamp"]
+[ext_resource type="Script" uid="uid://chfel6scfwrjq" path="res://scripts/Main.gd" id="1_main"]
+[ext_resource type="Script" uid="uid://d32nm2f7atwme" path="res://scripts/UdpCommandReceiver.gd" id="2_udp"]
+[ext_resource type="PackedScene" path="res://scenes/Room.tscn" id="3_room"]
+[ext_resource type="PackedScene" path="res://scenes/Desk.tscn" id="4_desk"]
+[ext_resource type="PackedScene" path="res://scenes/WindowWall.tscn" id="5_window"]
+[ext_resource type="PackedScene" path="res://scenes/LampRig.tscn" id="6_lamp"]
 
-[node name="Main" type="Node3D"]
+[sub_resource type="Environment" id="Environment_soft_ambient"]
+background_mode = 1
+background_color = Color(0.78, 0.83, 0.88, 1)
+ambient_light_source = 2
+ambient_light_color = Color(0.82, 0.8, 0.74, 1)
+ambient_light_energy = 0.44
+tonemap_mode = 3
+
+[node name="Main" type="Node3D" unique_id=2024635897]
 script = ExtResource("1_main")
 
-[node name="UdpCommandReceiver" type="Node" parent="."]
-script = ExtResource("2_udp")
-listen_port = 4242
-autostart = false
+[node name="Room" parent="." unique_id=1833341642 instance=ExtResource("3_room")]
 
-[node name="LampRig" parent="." instance=ExtResource("3_lamp")]
+[node name="WindowWall" parent="." unique_id=1745113251 instance=ExtResource("5_window")]
+transform = Transform3D(1.4339784, 0, 0, 0, 1.1842474, 0, 0, 0, 1, 0, 0, 0.3300166)
 
-[node name="Camera3D" type="Camera3D" parent="."]
+[node name="Desk" parent="." unique_id=362452929 instance=ExtResource("4_desk")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.3839631, 0.1798091)
+
+[node name="LampRig" parent="." unique_id=1449920244 instance=ExtResource("6_lamp")]
+transform = Transform3D(0.67981076, 0, -0.45853823, 0, 0.82, 0, 0.45853823, 0, 0.67981076, -0.28, 0.3839631, 0.25980908)
+
+[node name="Camera3D" type="Camera3D" parent="." unique_id=1595270987]
+transform = Transform3D(-0.7402756, -0.07373991, 0.6682474, -0.055444248, 0.99727696, 0.048627347, -0.6700135, -0.001052834, -0.74234825, 3.0926745, 1.4113333, -3.1365385)
 current = true
+fov = 42.0
 
-[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1737846141]
+transform = Transform3D(0.9510566, 0.20677249, -0.22964424, 0, 0.743145, 0.6691304, 0.30901673, -0.63638085, 0.7067729, 0, 0, 0)
+light_energy = 1.18
+shadow_enabled = true
 
-[node name="FillLight3D" type="OmniLight3D" parent="."]
+[node name="FillLight3D" type="OmniLight3D" parent="." unique_id=1270559409]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.8, 1.9, -1.15)
+light_energy = 0.52
+
+[node name="WindowSoftDaylight" type="OmniLight3D" parent="." unique_id=1675998506]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.35, 2.16, 0.88)
+light_energy = 0.42
+omni_range = 4.2
+
+[node name="TabletopWarmBounce" type="OmniLight3D" parent="." unique_id=76484485]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.25, 0.62, -1.25)
+light_color = Color(1, 0.86, 0.68, 1)
+light_energy = 0.18
+omni_range = 3.5
+
+[node name="SoftAmbientWorld" type="WorldEnvironment" parent="." unique_id=512091631]
+environment = SubResource("Environment_soft_ambient")
+
+[node name="UdpCommandReceiver" type="Node" parent="." unique_id=540753264]
+script = ExtResource("2_udp")
+autostart = false

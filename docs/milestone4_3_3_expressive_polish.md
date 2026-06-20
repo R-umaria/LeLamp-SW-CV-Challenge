@@ -68,3 +68,33 @@ Validation focus:
 - Table has visible legs and remains plain/untextured.
 - Lamp is larger in frame because the camera is closer/narrower.
 - When backend commands change `behavior.light`, the lamp body/emission, visible cone, and actual `SpotLight3D` emitted color change together.
+
+## Milestone 4.3.6 editable scene refactor
+
+Scope: Godot presentation layer only. Backend perception, state management, behavior policy, UDP command shape, object memory, browser chat, and LLM recall were not changed.
+
+Changed in `frontend_godot/scenes/`:
+
+- Added `Room.tscn` for editable walls, ceiling, floor, and trim.
+- Added `Desk.tscn` for the editable plain desk, legs, panels, supports, and drawer block.
+- Added `WindowWall.tscn` for the editable tall back-wall window, glass overlay, frame, sill, and outdoor silhouettes.
+- Expanded `LampRig.tscn` from an empty script host into an editor-visible 6-DOF lamp mesh/joint hierarchy.
+- Updated `Main.tscn` so it instances `Room`, `WindowWall`, `Desk`, and `LampRig` directly and stores the camera/static light/world-environment setup as scene nodes.
+
+Changed in `frontend_godot/scripts/Main.gd`:
+
+- Removed procedural room/table/window construction.
+- Kept UDP startup, backend-stale sleep handling, debug UI, and recall answer panel.
+- Added `apply_demo_framing_on_start`, default `false`, so saved editor transforms are preserved during runtime tinkering.
+
+Changed in `frontend_godot/scripts/LampController.gd`:
+
+- Removed procedural lamp geometry construction.
+- Bound to existing nodes in `LampRig.tscn` and continued to animate the same DOF chain.
+- Kept behavior-driven material/emission, `SpotLight3D.light_color`, and visible cone color synchronization.
+
+Validation focus:
+
+- `Main.tscn` should now expose room, desk, window, lamp, camera, and light nodes directly in the Godot scene tree.
+- Visual changes can be made using Godot viewport gizmos instead of editing procedural geometry constants in code.
+- UDP behavior commands should still animate the lamp exactly through the bounded frontend controller.

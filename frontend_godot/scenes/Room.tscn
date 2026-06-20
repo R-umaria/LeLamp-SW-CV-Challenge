@@ -1,0 +1,79 @@
+[gd_scene load_steps=12 format=3]
+
+[sub_resource type="StandardMaterial3D" id="mat_wall"]
+albedo_color = Color(0.86, 0.85, 0.81, 1)
+roughness = 0.62
+metallic = 0.0
+
+[sub_resource type="StandardMaterial3D" id="mat_ceiling"]
+albedo_color = Color(0.78, 0.78, 0.75, 1)
+roughness = 0.68
+metallic = 0.0
+
+[sub_resource type="StandardMaterial3D" id="mat_floor"]
+albedo_color = Color(0.36, 0.34, 0.3, 1)
+roughness = 0.7
+metallic = 0.0
+
+[sub_resource type="StandardMaterial3D" id="mat_trim"]
+albedo_color = Color(0.48, 0.48, 0.45, 1)
+roughness = 0.54
+metallic = 0.0
+
+[sub_resource type="BoxMesh" id="mesh_BackWall"]
+size = Vector3(8.6, 4.25, 0.1)
+
+[sub_resource type="BoxMesh" id="mesh_LeftWall"]
+size = Vector3(0.1, 4.25, 4.65)
+
+[sub_resource type="BoxMesh" id="mesh_Ceiling"]
+size = Vector3(8.7, 0.08, 4.75)
+
+[sub_resource type="BoxMesh" id="mesh_Floor"]
+size = Vector3(8.7, 0.08, 4.75)
+
+[sub_resource type="BoxMesh" id="mesh_BackBaseboard"]
+size = Vector3(8.55, 0.08, 0.08)
+
+[sub_resource type="BoxMesh" id="mesh_LeftBaseboard"]
+size = Vector3(0.09, 0.08, 4.65)
+
+[sub_resource type="BoxMesh" id="mesh_LeftBackCornerTrim"]
+size = Vector3(0.08, 4.15, 0.08)
+
+[node name="Room" type="Node3D"]
+
+[node name="BackWall" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_BackWall")
+material_override = SubResource("mat_wall")
+position = Vector3(0, 1.52, 1.58)
+
+[node name="LeftWall" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_LeftWall")
+material_override = SubResource("mat_wall")
+position = Vector3(-4.25, 1.52, -0.42)
+
+[node name="Ceiling" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_Ceiling")
+material_override = SubResource("mat_ceiling")
+position = Vector3(0, 3.68, -0.42)
+
+[node name="Floor" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_Floor")
+material_override = SubResource("mat_floor")
+position = Vector3(0, -0.62, -0.42)
+
+[node name="BackBaseboard" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_BackBaseboard")
+material_override = SubResource("mat_trim")
+position = Vector3(0, -0.18, 1.5)
+
+[node name="LeftBaseboard" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_LeftBaseboard")
+material_override = SubResource("mat_trim")
+position = Vector3(-4.19, -0.18, -0.42)
+
+[node name="LeftBackCornerTrim" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_LeftBackCornerTrim")
+material_override = SubResource("mat_trim")
+position = Vector3(-4.19, 1.52, 1.5)

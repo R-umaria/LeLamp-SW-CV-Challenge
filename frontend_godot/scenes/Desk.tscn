@@ -1,0 +1,127 @@
+[gd_scene load_steps=18 format=3]
+
+[sub_resource type="StandardMaterial3D" id="mat_wood"]
+albedo_color = Color(0.66, 0.49, 0.32, 1)
+roughness = 0.58
+metallic = 0.0
+
+[sub_resource type="StandardMaterial3D" id="mat_wood_dark"]
+albedo_color = Color(0.5, 0.36, 0.23, 1)
+roughness = 0.6
+metallic = 0.0
+
+[sub_resource type="StandardMaterial3D" id="mat_wood_light"]
+albedo_color = Color(0.66, 0.49, 0.32, 1)
+roughness = 0.58
+metallic = 0.0
+
+[sub_resource type="StandardMaterial3D" id="mat_handle"]
+albedo_color = Color(0.06, 0.055, 0.045, 1)
+roughness = 0.42
+metallic = 0.0
+
+[sub_resource type="BoxMesh" id="mesh_WideWoodTabletop"]
+size = Vector3(6.55, 0.16, 2.75)
+
+[sub_resource type="BoxMesh" id="mesh_FrontLeftTableLeg"]
+size = Vector3(0.22, 0.7, 0.22)
+
+[sub_resource type="BoxMesh" id="mesh_FrontRightTableLeg"]
+size = Vector3(0.22, 0.7, 0.22)
+
+[sub_resource type="BoxMesh" id="mesh_BackLeftTableLeg"]
+size = Vector3(0.2, 0.64, 0.2)
+
+[sub_resource type="BoxMesh" id="mesh_BackRightTableLeg"]
+size = Vector3(0.2, 0.64, 0.2)
+
+[sub_resource type="BoxMesh" id="mesh_TableFrontThickEdge"]
+size = Vector3(6.62, 0.2, 0.12)
+
+[sub_resource type="BoxMesh" id="mesh_TableRightSideEdge"]
+size = Vector3(0.14, 0.18, 2.76)
+
+[sub_resource type="BoxMesh" id="mesh_LeftDeskSidePanel"]
+size = Vector3(0.18, 0.86, 1.82)
+
+[sub_resource type="BoxMesh" id="mesh_RightDeskSidePanel"]
+size = Vector3(0.18, 0.86, 1.7)
+
+[sub_resource type="BoxMesh" id="mesh_RearSupportPanel"]
+size = Vector3(5.8, 0.52, 0.12)
+
+[sub_resource type="BoxMesh" id="mesh_RightDrawerBlock"]
+size = Vector3(1.35, 0.56, 0.13)
+
+[sub_resource type="BoxMesh" id="mesh_RightDrawerTopLine"]
+size = Vector3(1.32, 0.035, 0.145)
+
+[sub_resource type="BoxMesh" id="mesh_RightDrawerHandle"]
+size = Vector3(0.38, 0.08, 0.04)
+
+[node name="Desk" type="Node3D"]
+
+[node name="WideWoodTabletop" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_WideWoodTabletop")
+material_override = SubResource("mat_wood")
+position = Vector3(0, -0.08, -0.3)
+
+[node name="FrontLeftTableLeg" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_FrontLeftTableLeg")
+material_override = SubResource("mat_wood_dark")
+position = Vector3(-2.95, -0.5, -1.48)
+
+[node name="FrontRightTableLeg" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_FrontRightTableLeg")
+material_override = SubResource("mat_wood_dark")
+position = Vector3(2.95, -0.5, -1.48)
+
+[node name="BackLeftTableLeg" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_BackLeftTableLeg")
+material_override = SubResource("mat_wood_dark")
+position = Vector3(-2.85, -0.48, 0.72)
+
+[node name="BackRightTableLeg" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_BackRightTableLeg")
+material_override = SubResource("mat_wood_dark")
+position = Vector3(2.85, -0.48, 0.72)
+
+[node name="TableFrontThickEdge" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_TableFrontThickEdge")
+material_override = SubResource("mat_wood_dark")
+position = Vector3(0, -0.2, -1.7)
+
+[node name="TableRightSideEdge" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_TableRightSideEdge")
+material_override = SubResource("mat_wood_dark")
+position = Vector3(3.22, -0.19, -0.3)
+
+[node name="LeftDeskSidePanel" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_LeftDeskSidePanel")
+material_override = SubResource("mat_wood_dark")
+position = Vector3(-2.9, -0.58, -0.52)
+
+[node name="RightDeskSidePanel" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_RightDeskSidePanel")
+material_override = SubResource("mat_wood_dark")
+position = Vector3(3.03, -0.58, -0.62)
+
+[node name="RearSupportPanel" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_RearSupportPanel")
+material_override = SubResource("mat_wood_dark")
+position = Vector3(0.02, -0.58, 0.86)
+
+[node name="RightDrawerBlock" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_RightDrawerBlock")
+material_override = SubResource("mat_wood")
+position = Vector3(1.7, -0.58, -1.5)
+
+[node name="RightDrawerTopLine" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_RightDrawerTopLine")
+material_override = SubResource("mat_wood_light")
+position = Vector3(1.7, -0.31, -1.585)
+
+[node name="RightDrawerHandle" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_RightDrawerHandle")
+material_override = SubResource("mat_handle")
+position = Vector3(1.7, -0.58, -1.61)

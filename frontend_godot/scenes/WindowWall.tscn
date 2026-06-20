@@ -1,0 +1,319 @@
+[gd_scene load_steps=38 format=3]
+
+[sub_resource type="StandardMaterial3D" id="mat_frame"]
+albedo_color = Color(0.16, 0.17, 0.16, 1)
+roughness = 0.42
+metallic = 0.0
+
+[sub_resource type="StandardMaterial3D" id="mat_sky"]
+albedo_color = Color(0.7, 0.84, 0.98, 1)
+roughness = 0.95
+metallic = 0.0
+
+[sub_resource type="StandardMaterial3D" id="mat_glass"]
+transparency = 1
+albedo_color = Color(0.74, 0.88, 1, 0.3)
+roughness = 0.18
+metallic = 0.0
+
+[sub_resource type="StandardMaterial3D" id="mat_building"]
+albedo_color = Color(0.66, 0.69, 0.7, 1)
+roughness = 0.75
+metallic = 0.0
+
+[sub_resource type="StandardMaterial3D" id="mat_distant"]
+albedo_color = Color(0.78, 0.8, 0.8, 1)
+roughness = 0.8
+metallic = 0.0
+
+[sub_resource type="StandardMaterial3D" id="mat_tree"]
+albedo_color = Color(0.38, 0.58, 0.32, 1)
+roughness = 0.82
+metallic = 0.0
+
+[sub_resource type="StandardMaterial3D" id="mat_tree_light"]
+albedo_color = Color(0.5, 0.68, 0.4, 1)
+roughness = 0.86
+metallic = 0.0
+
+[sub_resource type="BoxMesh" id="mesh_WindowSkyPanel"]
+size = Vector3(4.72, 2.26, 0.035)
+
+[sub_resource type="BoxMesh" id="mesh_WindowGlassOverlay"]
+size = Vector3(4.68, 2.2, 0.02)
+
+[sub_resource type="BoxMesh" id="mesh_WindowTopFrame"]
+size = Vector3(5.08, 0.12, 0.13)
+
+[sub_resource type="BoxMesh" id="mesh_WindowBottomFrame"]
+size = Vector3(5.08, 0.12, 0.13)
+
+[sub_resource type="BoxMesh" id="mesh_WindowLeftFrame"]
+size = Vector3(0.13, 2.48, 0.13)
+
+[sub_resource type="BoxMesh" id="mesh_WindowRightFrame"]
+size = Vector3(0.13, 2.48, 0.13)
+
+[sub_resource type="BoxMesh" id="mesh_WindowInnerTopShadow"]
+size = Vector3(4.82, 0.045, 0.1)
+
+[sub_resource type="BoxMesh" id="mesh_WindowSill"]
+size = Vector3(5.18, 0.1, 0.28)
+
+[sub_resource type="BoxMesh" id="mesh_CityBlock_00"]
+size = Vector3(0.3, 0.34, 0.045)
+
+[sub_resource type="BoxMesh" id="mesh_CityBlock_01"]
+size = Vector3(0.24, 0.56, 0.045)
+
+[sub_resource type="BoxMesh" id="mesh_CityBlock_02"]
+size = Vector3(0.38, 0.28, 0.045)
+
+[sub_resource type="BoxMesh" id="mesh_CityBlock_03"]
+size = Vector3(0.26, 0.44, 0.045)
+
+[sub_resource type="BoxMesh" id="mesh_CityBlock_04"]
+size = Vector3(0.42, 0.25, 0.045)
+
+[sub_resource type="BoxMesh" id="mesh_CityBlock_05"]
+size = Vector3(0.32, 0.48, 0.045)
+
+[sub_resource type="BoxMesh" id="mesh_CityBlock_06"]
+size = Vector3(0.24, 0.32, 0.045)
+
+[sub_resource type="BoxMesh" id="mesh_CityBlock_07"]
+size = Vector3(0.36, 0.4, 0.045)
+
+[sub_resource type="BoxMesh" id="mesh_CityBlock_08"]
+size = Vector3(0.32, 0.27, 0.045)
+
+[sub_resource type="BoxMesh" id="mesh_CityBlock_09"]
+size = Vector3(0.26, 0.38, 0.045)
+
+[sub_resource type="BoxMesh" id="mesh_TreeBandBack"]
+size = Vector3(4.45, 0.16, 0.045)
+
+[sub_resource type="BoxMesh" id="mesh_TreeBandFront"]
+size = Vector3(4.55, 0.12, 0.05)
+
+[sub_resource type="SphereMesh" id="mesh_TreeBlob_00"]
+radius = 0.16
+height = 0.32
+radial_segments = 8
+rings = 4
+
+[sub_resource type="SphereMesh" id="mesh_TreeBlob_01"]
+radius = 0.15
+height = 0.3
+radial_segments = 8
+rings = 4
+
+[sub_resource type="SphereMesh" id="mesh_TreeBlob_02"]
+radius = 0.17
+height = 0.34
+radial_segments = 8
+rings = 4
+
+[sub_resource type="SphereMesh" id="mesh_TreeBlob_03"]
+radius = 0.14
+height = 0.28
+radial_segments = 8
+rings = 4
+
+[sub_resource type="SphereMesh" id="mesh_TreeBlob_04"]
+radius = 0.17
+height = 0.34
+radial_segments = 8
+rings = 4
+
+[sub_resource type="SphereMesh" id="mesh_TreeBlob_05"]
+radius = 0.14
+height = 0.28
+radial_segments = 8
+rings = 4
+
+[sub_resource type="SphereMesh" id="mesh_TreeBlob_06"]
+radius = 0.16
+height = 0.32
+radial_segments = 8
+rings = 4
+
+[sub_resource type="SphereMesh" id="mesh_TreeBlob_07"]
+radius = 0.15
+height = 0.3
+radial_segments = 8
+rings = 4
+
+[sub_resource type="SphereMesh" id="mesh_TreeBlob_08"]
+radius = 0.16
+height = 0.32
+radial_segments = 8
+rings = 4
+
+[sub_resource type="SphereMesh" id="mesh_TreeBlob_09"]
+radius = 0.13
+height = 0.26
+radial_segments = 8
+rings = 4
+
+[node name="WindowWall" type="Node3D"]
+
+[node name="WindowSkyPanel" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_WindowSkyPanel")
+material_override = SubResource("mat_sky")
+position = Vector3(0.17, 1.73, 1.235)
+
+[node name="WindowGlassOverlay" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_WindowGlassOverlay")
+material_override = SubResource("mat_glass")
+position = Vector3(0.17, 1.73, 1.205)
+
+[node name="WindowTopFrame" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_WindowTopFrame")
+material_override = SubResource("mat_frame")
+position = Vector3(0.17, 2.92, 1.185)
+
+[node name="WindowBottomFrame" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_WindowBottomFrame")
+material_override = SubResource("mat_frame")
+position = Vector3(0.17, 0.54, 1.185)
+
+[node name="WindowLeftFrame" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_WindowLeftFrame")
+material_override = SubResource("mat_frame")
+position = Vector3(-2.43, 1.73, 1.185)
+
+[node name="WindowRightFrame" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_WindowRightFrame")
+material_override = SubResource("mat_frame")
+position = Vector3(2.77, 1.73, 1.185)
+
+[node name="WindowInnerTopShadow" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_WindowInnerTopShadow")
+material_override = SubResource("mat_frame")
+position = Vector3(0.17, 2.73, 1.145)
+
+[node name="WindowSill" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_WindowSill")
+material_override = SubResource("mat_frame")
+position = Vector3(0.17, 0.44, 1.06)
+
+[node name="CityBlock_00" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_CityBlock_00")
+material_override = SubResource("mat_distant")
+position = Vector3(-2.02, 0.9, 1.165)
+
+[node name="CityBlock_01" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_CityBlock_01")
+material_override = SubResource("mat_building")
+position = Vector3(-1.62, 1, 1.165)
+
+[node name="CityBlock_02" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_CityBlock_02")
+material_override = SubResource("mat_distant")
+position = Vector3(-1.15, 0.86, 1.165)
+
+[node name="CityBlock_03" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_CityBlock_03")
+material_override = SubResource("mat_building")
+position = Vector3(-0.57, 0.95, 1.165)
+
+[node name="CityBlock_04" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_CityBlock_04")
+material_override = SubResource("mat_distant")
+position = Vector3(-0.1, 0.84, 1.165)
+
+[node name="CityBlock_05" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_CityBlock_05")
+material_override = SubResource("mat_building")
+position = Vector3(0.43, 0.96, 1.165)
+
+[node name="CityBlock_06" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_CityBlock_06")
+material_override = SubResource("mat_distant")
+position = Vector3(0.95, 0.88, 1.165)
+
+[node name="CityBlock_07" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_CityBlock_07")
+material_override = SubResource("mat_building")
+position = Vector3(1.44, 0.93, 1.165)
+
+[node name="CityBlock_08" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_CityBlock_08")
+material_override = SubResource("mat_distant")
+position = Vector3(1.94, 0.86, 1.165)
+
+[node name="CityBlock_09" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_CityBlock_09")
+material_override = SubResource("mat_building")
+position = Vector3(2.35, 0.92, 1.165)
+
+[node name="TreeBandBack" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_TreeBandBack")
+material_override = SubResource("mat_tree_light")
+position = Vector3(0.23, 0.69, 1.145)
+
+[node name="TreeBandFront" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_TreeBandFront")
+material_override = SubResource("mat_tree")
+position = Vector3(0.22, 0.61, 1.125)
+
+[node name="TreeBlob_00" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_TreeBlob_00")
+material_override = SubResource("mat_tree")
+position = Vector3(-2.05, 0.73, 1.105)
+scale = Vector3(1.1, 0.7, 0.25)
+
+[node name="TreeBlob_01" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_TreeBlob_01")
+material_override = SubResource("mat_tree_light")
+position = Vector3(-1.64, 0.72, 1.105)
+scale = Vector3(1, 0.66, 0.25)
+
+[node name="TreeBlob_02" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_TreeBlob_02")
+material_override = SubResource("mat_tree")
+position = Vector3(-1.18, 0.74, 1.105)
+scale = Vector3(1.2, 0.72, 0.25)
+
+[node name="TreeBlob_03" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_TreeBlob_03")
+material_override = SubResource("mat_tree_light")
+position = Vector3(-0.66, 0.7, 1.105)
+scale = Vector3(1, 0.68, 0.25)
+
+[node name="TreeBlob_04" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_TreeBlob_04")
+material_override = SubResource("mat_tree")
+position = Vector3(-0.12, 0.73, 1.105)
+scale = Vector3(1.22, 0.72, 0.25)
+
+[node name="TreeBlob_05" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_TreeBlob_05")
+material_override = SubResource("mat_tree_light")
+position = Vector3(0.42, 0.7, 1.105)
+scale = Vector3(1, 0.65, 0.25)
+
+[node name="TreeBlob_06" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_TreeBlob_06")
+material_override = SubResource("mat_tree")
+position = Vector3(0.94, 0.73, 1.105)
+scale = Vector3(1.18, 0.7, 0.25)
+
+[node name="TreeBlob_07" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_TreeBlob_07")
+material_override = SubResource("mat_tree_light")
+position = Vector3(1.46, 0.71, 1.105)
+scale = Vector3(1.05, 0.66, 0.25)
+
+[node name="TreeBlob_08" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_TreeBlob_08")
+material_override = SubResource("mat_tree")
+position = Vector3(2, 0.73, 1.105)
+scale = Vector3(1.15, 0.68, 0.25)
+
+[node name="TreeBlob_09" type="MeshInstance3D" parent="."]
+mesh = SubResource("mesh_TreeBlob_09")
+material_override = SubResource("mat_tree_light")
+position = Vector3(2.42, 0.69, 1.105)
+scale = Vector3(1, 0.65, 0.25)
