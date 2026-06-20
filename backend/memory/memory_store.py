@@ -226,6 +226,34 @@ class MemoryStore:
             ).fetchone()
         return self._row_to_record(row) if row else None
 
+    def find_latest_by_normalized_label_since(
+        self,
+        normalized_label: str,
+        since: datetime,
+    ) -> MemoryRecord | None:
+        """Return the latest exact label match at or after ``since``.
+
+        Timestamps are stored as ISO-8601 strings, so lexicographic ordering works
+        for records produced by this project. This keeps the 24-hour recall rule
+        in SQLite instead of asking the LLM to decide whether a memory is recent.
+        """
+        normalized = normalized_label.strip().lower()
+        if not normalized:
+            return None
+
+        with self._connection() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM object_memory
+                WHERE lower(normalized_label) = ?
+                  AND timestamp >= ?
+                ORDER BY timestamp DESC
+                LIMIT 1
+                """,
+                (normalized, since.isoformat(timespec="seconds")),
+            ).fetchone()
+        return self._row_to_record(row) if row else None
+
     def find_recent_duplicate(
         self,
         normalized_label: str,

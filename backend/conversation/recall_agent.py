@@ -18,7 +18,7 @@ import logging
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -130,6 +130,7 @@ class RecallAgent:
         ollama_keep_alive: str = "1h",
         llm_max_tokens: int = 120,
         recent_object_limit: int = 8,
+        recall_lookback_hours: float | None = None,
         log_paths: str | Path | Iterable[str | Path] | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
@@ -138,6 +139,7 @@ class RecallAgent:
         self.use_llm = bool(use_llm)
         self.llm_required = bool(llm_required)
         self.recent_object_limit = int(recent_object_limit)
+        self.recall_lookback_hours = None if recall_lookback_hours is None or float(recall_lookback_hours) <= 0 else float(recall_lookback_hours)
         self.llm_max_tokens = max(32, int(llm_max_tokens))
         self.logger = logger or logging.getLogger("lelamp")
         self.log_paths = _coerce_paths(log_paths)
@@ -184,7 +186,11 @@ class RecallAgent:
         recent_records: tuple[MemoryRecord, ...] = ()
 
         if intent.intent == ConversationIntentType.OBJECT_LAST_SEEN and parsed.normalized_label:
-            memory_record = self.store.find_latest_by_normalized_label(parsed.normalized_label)
+            if self.recall_lookback_hours is None:
+                memory_record = self.store.find_latest_by_normalized_label(parsed.normalized_label)
+            else:
+                cutoff = datetime.now() - timedelta(hours=self.recall_lookback_hours)
+                memory_record = self.store.find_latest_by_normalized_label_since(parsed.normalized_label, cutoff)
         elif intent.intent == ConversationIntentType.LIST_RECENT_OBJECTS:
             recent_records = tuple(self.store.recent_unique_by_normalized_label(limit=self.recent_object_limit))
 
@@ -627,6 +633,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ollama-timeout", type=float, default=None, help="Backward-compatible alias for --llm-timeout")
     parser.add_argument("--test-ollama", action="store_true", help="Check Ollama connectivity/model availability and exit")
     parser.add_argument("--warm-ollama", action="store_true", help="Warm the selected Ollama model and exit")
+    parser.add_argument("--recall-lookback-hours", type=float, default=None, help="Only answer object-location questions from memories within this many hours. Omit for all-time recall.")
     parser.add_argument("--json", action="store_true", help="Print machine-readable recall result JSON")
     parser.add_argument("--debug", action="store_true", help="Print debug metadata such as frame_path outside the spoken answer")
     parser.add_argument("--log-path", type=str, default="logs/recall.jsonl", help="JSONL recall log path")
@@ -690,6 +697,7 @@ def main() -> int:
         llm_connect_timeout_s=args.llm_connect_timeout,
         ollama_keep_alive=args.ollama_keep_alive,
         llm_max_tokens=args.llm_max_tokens,
+        recall_lookback_hours=args.recall_lookback_hours,
         log_paths=args.log_path,
     )
     result = agent.answer(args.query)

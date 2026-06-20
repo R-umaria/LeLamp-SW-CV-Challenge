@@ -29,6 +29,10 @@ static func normalize_motion(motion: String) -> String:
 			return "gesture_approach"
 		"gesture_retreat", "palm_push", "move_away":
 			return "gesture_retreat"
+		"recall_point", "point_to_object", "pointing":
+			return "recall_point"
+		"recall_not_found", "no_memory", "sad_no":
+			return "recall_not_found"
 		"happy", "happy_bounce":
 			return "happy_bounce"
 		"dance", "dance_loop", "music_dance":
@@ -62,6 +66,10 @@ static func target_for(motion: String, t: float, elapsed_s: float) -> PackedFloa
 			return _gesture_approach(t)
 		"gesture_retreat":
 			return _gesture_retreat(t)
+		"recall_point":
+			return _recall_point(t)
+		"recall_not_found":
+			return _recall_not_found(t)
 		"scanning":
 			return _scanning(t)
 		"thinking_slow":
@@ -103,6 +111,10 @@ static func smooth_speed_for(motion: String) -> float:
 			return 1.85
 		"gesture_approach", "gesture_retreat":
 			return 2.10
+		"recall_point":
+			return 1.95
+		"recall_not_found":
+			return 1.30
 		"thinking_slow":
 			return 1.95
 		"happy_bounce", "dance_loop":
@@ -115,7 +127,7 @@ static func smooth_speed_for(motion: String) -> float:
 
 static func blocks_face_follow(motion: String) -> bool:
 	var skill: String = normalize_motion(motion)
-	return skill == "sleep_rest" or skill == "sleepy_search_then_rest" or skill == "upset_turn"
+	return skill == "sleep_rest" or skill == "sleepy_search_then_rest" or skill == "upset_turn" or skill == "recall_not_found"
 
 
 static func _target(
@@ -199,6 +211,21 @@ static func _gesture_approach(t: float) -> PackedFloat32Array:
 static func _gesture_retreat(t: float) -> PackedFloat32Array:
 	var recoil: float = maxf(0.0, sin(t * 0.95))
 	return _target(-8.0 * sin(t * 0.34), 48.0 + 5.0 * recoil, -112.0 - 5.0 * recoil, 30.0, -10.0, -18.0 - 3.0 * recoil, 0.18)
+
+
+static func _recall_point(t: float) -> PackedFloat32Array:
+	# A stable pointing posture. LampController redirects the yaw/pitch toward the
+	# recalled screen region using memory.recall_target.point_x/y_norm.
+	var intent: float = maxf(0.0, sin(t * 0.75))
+	return _target(0.0, 23.0 - 1.5 * intent, -66.0 - 2.0 * intent, 13.0, 0.0, 5.0 + 1.5 * intent, 1.0)
+
+
+static func _recall_not_found(t: float) -> PackedFloat32Array:
+	# Depressed body posture plus a wrist/head "no" shake. This is intentionally
+	# close to sleep language without fully collapsing into sleep.
+	var no_shake: float = sin(t * 1.28)
+	var droop: float = 1.6 * sin(t * 0.44)
+	return _target(0.0, 64.0 + droop, -124.0, 32.0, 28.0 * no_shake, -38.0 + droop, 0.0)
 
 
 static func _scanning(t: float) -> PackedFloat32Array:

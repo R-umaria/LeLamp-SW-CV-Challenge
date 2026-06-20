@@ -4,8 +4,9 @@ const DEG: float = PI / 180.0
 const MotionSkillLibrary = preload("res://scripts/lumos/MotionSkillLibrary.gd")
 const LightSkillLibrary = preload("res://scripts/lumos/LightSkillLibrary.gd")
 
-@export var face_follow_max_degrees: float = 68.0
-@export var face_follow_smooth_speed: float = 1.65
+@export var face_follow_max_degrees: float = 82.0
+@export var face_follow_vertical_max_degrees: float = 46.0
+@export var face_follow_smooth_speed: float = 1.85
 @export var motion_time_scale: float = 0.48
 @export var smooth_speed_scale: float = 0.72
 @export var camera_approach_offset: Vector3 = Vector3(0.24, 0.0, -0.26)
@@ -36,10 +37,15 @@ var face_x_norm: float = -1.0
 var face_y_norm: float = -1.0
 var gesture_status: String = "none"
 var gesture_confidence: float = 0.0
+var recall_target_found: bool = false
+var recall_point_x_norm: float = -1.0
+var recall_point_y_norm: float = -1.0
+var recall_location_label: String = ""
 
 var _time: float = 0.0
 var _motion_started_at: float = 0.0
-var _smoothed_face_follow_deg: float = 0.0
+var _smoothed_face_follow_x_deg: float = 0.0
+var _smoothed_face_follow_y_deg: float = 0.0
 var _home_position: Vector3 = Vector3.ZERO
 var _target_root_position: Vector3 = Vector3.ZERO
 var _target: Dictionary = {
@@ -100,6 +106,13 @@ func apply_command(command: Dictionary) -> void:
 	gesture_status = str(gesture.get("status", gesture_status))
 	gesture_confidence = float(gesture.get("confidence", gesture_confidence))
 
+	var memory: Dictionary = _dictionary_value(command, "memory")
+	var recall_target: Dictionary = _dictionary_value(memory, "recall_target")
+	recall_target_found = bool(recall_target.get("found", false))
+	recall_point_x_norm = _optional_norm_float(recall_target, "point_x_norm", -1.0)
+	recall_point_y_norm = _optional_norm_float(recall_target, "point_y_norm", -1.0)
+	recall_location_label = str(recall_target.get("location_label", ""))
+
 
 func _process(delta: float) -> void:
 	_time += delta
@@ -111,11 +124,23 @@ func _process(delta: float) -> void:
 
 
 func _update_face_follow(delta: float) -> void:
-	var desired_follow_deg: float = 0.0
-	if face_x_norm >= 0.0 and face_x_norm <= 1.0 and not MotionSkillLibrary.blocks_face_follow(current_motion):
-		desired_follow_deg = clampf((0.5 - face_x_norm) * face_follow_max_degrees * 2.0, -face_follow_max_degrees, face_follow_max_degrees)
+	var source_x: float = face_x_norm
+	var source_y: float = face_y_norm
+	if current_motion == "recall_point" and recall_target_found:
+		source_x = recall_point_x_norm
+		source_y = recall_point_y_norm
+
+	var desired_x_deg: float = 0.0
+	var desired_y_deg: float = 0.0
+	if not MotionSkillLibrary.blocks_face_follow(current_motion):
+		if source_x >= 0.0 and source_x <= 1.0:
+			desired_x_deg = clampf((0.5 - source_x) * face_follow_max_degrees * 2.0, -face_follow_max_degrees, face_follow_max_degrees)
+		if source_y >= 0.0 and source_y <= 1.0:
+			desired_y_deg = clampf((0.5 - source_y) * face_follow_vertical_max_degrees * 2.0, -face_follow_vertical_max_degrees, face_follow_vertical_max_degrees)
+
 	var weight: float = clampf(delta * face_follow_smooth_speed, 0.0, 1.0)
-	_smoothed_face_follow_deg = lerpf(_smoothed_face_follow_deg, desired_follow_deg, weight)
+	_smoothed_face_follow_x_deg = lerpf(_smoothed_face_follow_x_deg, desired_x_deg, weight)
+	_smoothed_face_follow_y_deg = lerpf(_smoothed_face_follow_y_deg, desired_y_deg, weight)
 
 
 func _update_motion_targets() -> void:
@@ -138,13 +163,15 @@ func _set_target_from_degrees(target_degrees: PackedFloat32Array) -> void:
 	if target_degrees.size() < MotionSkillLibrary.TARGET_SIZE:
 		return
 	var follow_weight: float = clampf(target_degrees[6], 0.0, 1.0)
-	var follow_deg: float = _smoothed_face_follow_deg * follow_weight
-	_target["base_yaw"] = clampf(target_degrees[0] + follow_deg, -150.0, 150.0) * DEG
-	_target["shoulder_pitch"] = clampf(target_degrees[1], -95.0, 95.0) * DEG
+	var follow_x_deg: float = _smoothed_face_follow_x_deg * follow_weight
+	var follow_y_deg: float = _smoothed_face_follow_y_deg * follow_weight
+
+	_target["base_yaw"] = clampf(target_degrees[0] + follow_x_deg, -155.0, 155.0) * DEG
+	_target["shoulder_pitch"] = clampf(target_degrees[1] - follow_y_deg * 0.28, -100.0, 100.0) * DEG
 	_target["elbow_pitch"] = clampf(target_degrees[2], -150.0, 115.0) * DEG
-	_target["wrist_pitch"] = clampf(target_degrees[3], -80.0, 80.0) * DEG
-	_target["wrist_yaw"] = clampf(target_degrees[4] + follow_deg * 0.44, -90.0, 90.0) * DEG
-	_target["head_tilt"] = clampf(target_degrees[5], -55.0, 35.0) * DEG
+	_target["wrist_pitch"] = clampf(target_degrees[3] - follow_y_deg * 0.34, -85.0, 85.0) * DEG
+	_target["wrist_yaw"] = clampf(target_degrees[4] + follow_x_deg * 0.46, -95.0, 95.0) * DEG
+	_target["head_tilt"] = clampf(target_degrees[5] + follow_y_deg * 0.88, -62.0, 46.0) * DEG
 
 
 func _smooth_to_targets(delta: float) -> void:

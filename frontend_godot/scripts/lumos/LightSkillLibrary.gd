@@ -18,6 +18,10 @@ static func normalize_light(light: String) -> String:
 			return "upset_blue"
 		"thinking", "focus_glow":
 			return "focus_glow"
+		"pointing", "pointer_spot", "recall_pointer":
+			return "pointer_spot"
+		"sad", "sad_dim", "recall_sad":
+			return "sad_dim"
 		"sleep", "sleep_red":
 			return "sleep_red"
 		_:
@@ -50,6 +54,12 @@ static func values_for(light: String, t: float) -> PackedFloat32Array:
 		"focus_glow":
 			var focus_pulse: float = 0.5 + 0.5 * sin(t * 0.70)
 			return _values(0.74, 0.76, 1.0, 0.96 + focus_pulse * 0.18)
+		"pointer_spot":
+			var pointer_pulse: float = 0.5 + 0.5 * sin(t * 1.05)
+			return _values(1.0, 0.88, 0.46, 1.42 + pointer_pulse * 0.28)
+		"sad_dim":
+			var sad_pulse: float = 0.5 + 0.5 * sin(t * 0.32)
+			return _values(0.24, 0.34, 0.62, 0.20 + sad_pulse * 0.08)
 		"happy_gold":
 			var happy_pulse: float = 0.5 + 0.5 * sin(t * 1.45)
 			return _values(1.0, 0.78, 0.20, 1.02 + happy_pulse * 0.30)

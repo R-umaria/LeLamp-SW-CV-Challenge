@@ -213,6 +213,8 @@ func _refresh_debug_ui() -> void:
 	var engagement: Dictionary = _dictionary_value(_last_command, "engagement")
 	var behavior: Dictionary = _dictionary_value(_last_command, "behavior")
 	var gesture: Dictionary = _dictionary_value(_last_command, "gesture")
+	var memory: Dictionary = _dictionary_value(_last_command, "memory")
+	var recall_target: Dictionary = _dictionary_value(memory, "recall_target")
 	var speech_value: Variant = behavior.get("speech_text", "")
 	var speech_text: String = "" if speech_value == null else str(speech_value)
 	var now: float = Time.get_unix_time_from_system()
@@ -222,7 +224,7 @@ func _refresh_debug_ui() -> void:
 	var face_y_text: String = _optional_debug_value(engagement.get("face_y_norm", null))
 
 	var lines: Array[String] = []
-	lines.append("Lumos Milestone 4.6 Gesture + Motion Polish")
+	lines.append("Lumos Milestone 4.7 Vertical Follow + Recall Pointing")
 	lines.append("UDP: %s" % _receiver_status)
 	lines.append("Lumos browser chat: http://127.0.0.1:8765")
 	lines.append("Health: %s  age: %.1fs" % [connection_health, packet_age_s])
@@ -232,6 +234,13 @@ func _refresh_debug_ui() -> void:
 	lines.append("Reason: %s" % str(engagement.get("reason", "none")))
 	lines.append("Face hint: x=%s  y=%s" % [face_x_text, face_y_text])
 	lines.append("Gesture: %s  %.2f" % [str(gesture.get("status", "none")), float(gesture.get("confidence", 0.0))])
+	if recall_target.size() > 0:
+		lines.append("Recall target: found=%s loc=%s point=(%s,%s)" % [
+			str(recall_target.get("found", false)),
+			str(recall_target.get("location_label", "none")),
+			_optional_debug_value(recall_target.get("point_x_norm", null)),
+			_optional_debug_value(recall_target.get("point_y_norm", null)),
+		])
 	lines.append("Recall panel: %s" % ("visible" if _response_panel != null and _response_panel.visible else "hidden"))
 	if speech_text != "":
 		lines.append("Speech: %s" % speech_text)
@@ -273,6 +282,7 @@ func _default_command() -> Dictionary:
 		},
 		"memory": {
 			"last_detected_objects": [],
+			"recall_target": {"found": false},
 		},
 	}
 
@@ -299,5 +309,6 @@ func _sleep_command(age_s: float) -> Dictionary:
 		},
 		"memory": {
 			"last_detected_objects": [],
+			"recall_target": {"found": false},
 		},
 	}

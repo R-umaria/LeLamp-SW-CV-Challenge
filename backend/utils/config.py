@@ -19,10 +19,10 @@ class CameraConfig:
 
 @dataclass(frozen=True)
 class EngagementConfig:
-    # Wider geometry keeps Lumos following a visible user near the frame edge
-    # instead of immediately treating small head movement as disengagement.
-    center_tolerance_x: float = 0.36
-    center_tolerance_y: float = 0.34
+    # Wide geometry keeps Lumos tracking a visible user across almost the full
+    # webcam frame instead of treating normal up/down/side movement as disengagement.
+    center_tolerance_x: float = 0.46
+    center_tolerance_y: float = 0.44
     min_face_area_ratio: float = 0.018
 
     # Candidate filtering rejects tiny false positives while allowing a user who

@@ -26,6 +26,7 @@ except ImportError as exc:  # pragma: no cover - dependency guard
 
 from backend.behavior.behavior_policy import behavior_for_transition, behavior_with_gesture_override
 from backend.behavior.command_protocol import build_behavior_command
+from backend.behavior.recall_feedback import behavior_for_recall_result, recall_target_for_result
 from backend.behavior.godot_udp_sender import GodotUdpSender
 from backend.behavior.state_machine import InteractionStateMachine, LampState
 from backend.conversation.chat_udp_receiver import ChatUdpReceiver
@@ -77,8 +78,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--engaged-recovery-frames", type=int, default=2)
     parser.add_argument("--clear-engaged-confidence", type=float, default=0.72)
 
-    parser.add_argument("--center-tolerance-x", type=float, default=0.36)
-    parser.add_argument("--center-tolerance-y", type=float, default=0.34)
+    parser.add_argument("--center-tolerance-x", type=float, default=0.46)
+    parser.add_argument("--center-tolerance-y", type=float, default=0.44)
     parser.add_argument("--min-face-area-ratio", type=float, default=0.018)
     parser.add_argument("--min-candidate-area-ratio", type=float, default=0.006)
     parser.add_argument("--cascade-min-neighbors", type=int, default=6)
@@ -113,6 +114,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ollama-keep-alive", type=str, default="1h", help="Ollama keep_alive duration, e.g. 1h.")
     parser.add_argument("--ollama-timeout", type=float, default=None, help="Backward-compatible alias for --llm-timeout.")
     parser.add_argument("--llm-required", action="store_true", help="Fail fast at startup if Ollama/model is unavailable; live answers still fall back but log failures.")
+    parser.add_argument("--recall-lookback-hours", type=float, default=24.0, help="Only answer object-location questions from memories within this many hours. Use 0 for all-time recall.")
 
     window_group = parser.add_mutually_exclusive_group()
     window_group.add_argument("--show-window", action="store_true", default=True)
@@ -359,6 +361,7 @@ def main() -> int:
             llm_connect_timeout_s=args.llm_connect_timeout,
             ollama_keep_alive=args.ollama_keep_alive,
             llm_max_tokens=args.llm_max_tokens,
+            recall_lookback_hours=None if args.recall_lookback_hours <= 0 else args.recall_lookback_hours,
             log_paths=recall_log_paths,
             logger=logger,
         )
@@ -669,17 +672,15 @@ def main() -> int:
                         llm_error = work_result.error or "worker_error"
                         llm_fallback_reason = "worker_error"
 
+                    recall_behavior = behavior_for_recall_result(work_result.result, str(answer_text))
+                    recall_target = recall_target_for_result(work_result.result)
                     final_recall_command = build_behavior_command(
                         state=LampState.RECALLING,
                         engagement=smoothed_engagement,
-                        behavior={
-                            "motion": "thinking_slow",
-                            "light": "focus_glow",
-                            "sound": None,
-                            "speech_text": str(answer_text),
-                        },
+                        behavior=recall_behavior,
                         last_detected_objects=last_detected_objects,
                         gesture=gesture_payload,
+                        recall_target=recall_target,
                     )
                     print(json.dumps(final_recall_command, ensure_ascii=False), flush=True)
                     append_jsonl(command_paths, final_recall_command)

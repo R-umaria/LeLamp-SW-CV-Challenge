@@ -269,3 +269,15 @@ python -m backend.main --godot-udp --enable-web-chat --no-window
 ```
 
 For a true single-window future version, stream Python's processed preview into Godot instead of letting Godot open the webcam directly. Python should remain the perception owner for the challenge demo.
+
+## Milestone 4.7 patch
+
+Adds vertical face-following and embodied recall feedback. Lumos now uses both `face_x_norm` and `face_y_norm` to track the user across the webcam frame. Recall answers now drive a bounded Godot motion: found objects trigger `recall_point` + `pointer_spot`, while no recent memory triggers `recall_not_found` + `sad_dim`.
+
+Recommended command:
+
+```powershell
+python -m backend.main --show-window --godot-udp --enable-gestures --enable-objects --enable-web-chat --preview-flip-horizontal --recall-lookback-hours 24
+```
+
+See `docs/milestone4_7_vertical_follow_recall_pointing.md` for implementation details.
