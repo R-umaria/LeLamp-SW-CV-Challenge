@@ -369,21 +369,7 @@ Useful flags:
 --stt-speaker-min-confidence 0.45
 ```
 
-## Milestone 5.6 Gesture Emotion Control
+### Milestone 5.6.1 MediaPipe Windows hotfix
 
-Lumos now supports a bounded hand-gesture control layer when launched with `--enable-gestures`:
-
-- index beckon → come closer posture
-- open palm → retreat posture
-- thumbs up → happy affirmative bounce
-- thumb-index pinch → follow the pinch point
-- two-hand heart → shy baby-pink blush
-
-Recommended demo command:
-
-```powershell
-python -m backend.main --show-window --godot-udp --enable-gestures --gesture-max-hands 2 --enable-objects --enable-web-chat --preview-flip-horizontal
-```
-
-See `docs/milestone5_6_gesture_emotion_control.md` for implementation details and tuning knobs.
+If gestures failed with `AttributeError: module 'mediapipe' has no attribute 'solutions'`, update to the 5.6.1 hotfix. The gesture detector now falls back from `mediapipe.solutions.hands` to `mediapipe.python.solutions.hands`, matching the compatibility approach already used in face tracking.
 

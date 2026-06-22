@@ -30,9 +30,25 @@ except ImportError as exc:  # pragma: no cover - dependency guard
     raise ImportError("OpenCV is required for gesture overlays. Install with: pip install opencv-python") from exc
 
 try:  # MediaPipe is optional so the rest of Lumos can still run without it.
-    import mediapipe as mp
+    import mediapipe as mp  # type: ignore
 except ImportError:  # pragma: no cover - exercised only when dependency is absent
     mp = None
+
+try:  # MediaPipe exposes solutions differently across some Windows wheels.
+    if mp is None:
+        mp_hands = None
+        _MEDIAPIPE_HANDS_IMPORT_ERROR = "mediapipe_not_installed"
+    else:
+        try:
+            mp_hands = mp.solutions.hands  # type: ignore[attr-defined]
+            _MEDIAPIPE_HANDS_IMPORT_ERROR = None
+        except Exception:
+            from mediapipe.python.solutions import hands as mp_hands  # type: ignore
+
+            _MEDIAPIPE_HANDS_IMPORT_ERROR = None
+except Exception as exc:  # pragma: no cover - optional dependency compatibility path
+    mp_hands = None
+    _MEDIAPIPE_HANDS_IMPORT_ERROR = str(exc)
 
 from backend.utils.config import HandGestureConfig
 
@@ -99,18 +115,21 @@ class HandGestureDetector:
     def __init__(self, config: HandGestureConfig, logger: logging.Logger | None = None) -> None:
         self.config = config
         self.logger = logger or logging.getLogger("lelamp")
-        self.enabled = bool(config.enabled and mp is not None)
+        self.enabled = bool(config.enabled and mp_hands is not None)
         self._hands = None
         self._index_history: Deque[tuple[float, float]] = deque(maxlen=18)
         self._last_active_result: Optional[HandGestureResult] = None
         self._last_active_at = 0.0
 
-        if config.enabled and mp is None:
-            self.logger.warning("Hand gestures requested but mediapipe is not installed; gesture control is disabled")
+        if config.enabled and mp_hands is None:
+            self.logger.warning(
+                "Hand gestures requested but MediaPipe Hands is unavailable; gesture control is disabled reason=%s",
+                _MEDIAPIPE_HANDS_IMPORT_ERROR or "unknown",
+            )
             return
 
         if self.enabled:
-            self._hands = mp.solutions.hands.Hands(
+            self._hands = mp_hands.Hands(
                 static_image_mode=False,
                 max_num_hands=config.max_num_hands,
                 model_complexity=0,
