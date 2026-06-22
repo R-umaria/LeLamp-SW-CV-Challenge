@@ -10,6 +10,8 @@ static func normalize_light(light: String) -> String:
 			return "steady_warm"
 		"pink", "excited", "excited_pink":
 			return "excited_pink"
+		"baby_pink", "baby_pink_blush", "blush_pink", "heart_blush":
+			return "baby_pink_blush"
 		"happy", "happy_gold":
 			return "happy_gold"
 		"music", "dance_color":
@@ -73,6 +75,9 @@ static func values_for(light: String, t: float) -> PackedFloat32Array:
 		"happy_gold":
 			var happy_pulse: float = 0.5 + 0.5 * sin(t * 1.45)
 			return _values(1.0, 0.78, 0.20, 1.02 + happy_pulse * 0.30)
+		"baby_pink_blush":
+			var blush_pulse: float = 0.5 + 0.5 * sin(t * 1.10)
+			return _values(1.0, 0.52, 0.72, 0.92 + blush_pulse * 0.24)
 		"dance_color":
 			var r: float = 0.82 + 0.18 * sin(t * 1.28)
 			var g: float = 0.45 + 0.20 * sin(t * 1.28 + 2.0)

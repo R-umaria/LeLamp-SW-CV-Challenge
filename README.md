@@ -368,3 +368,22 @@ Useful flags:
 --stt-end-silence-s 0.85        # utterance finalization delay
 --stt-speaker-min-confidence 0.45
 ```
+
+## Milestone 5.6 Gesture Emotion Control
+
+Lumos now supports a bounded hand-gesture control layer when launched with `--enable-gestures`:
+
+- index beckon → come closer posture
+- open palm → retreat posture
+- thumbs up → happy affirmative bounce
+- thumb-index pinch → follow the pinch point
+- two-hand heart → shy baby-pink blush
+
+Recommended demo command:
+
+```powershell
+python -m backend.main --show-window --godot-udp --enable-gestures --gesture-max-hands 2 --enable-objects --enable-web-chat --preview-flip-horizontal
+```
+
+See `docs/milestone5_6_gesture_emotion_control.md` for implementation details and tuning knobs.
+

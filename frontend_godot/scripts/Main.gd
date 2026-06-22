@@ -237,7 +237,12 @@ func _refresh_debug_ui() -> void:
 	lines.append("Engagement: %s  %.2f" % [str(engagement.get("status", "unknown")), float(engagement.get("confidence", 0.0))])
 	lines.append("Reason: %s" % str(engagement.get("reason", "none")))
 	lines.append("Face hint: x=%s  y=%s  area=%s" % [face_x_text, face_y_text, face_area_text])
-	lines.append("Gesture: %s  %.2f" % [str(gesture.get("status", "none")), float(gesture.get("confidence", 0.0))])
+	lines.append("Gesture: %s  %.2f  target=(%s,%s)" % [
+		str(gesture.get("status", "none")),
+		float(gesture.get("confidence", 0.0)),
+		_optional_debug_value(gesture.get("target_x_norm", gesture.get("hand_x_norm", null))),
+		_optional_debug_value(gesture.get("target_y_norm", gesture.get("hand_y_norm", null))),
+	])
 	lines.append("Speech: %s  Speaker: %s  %.2f" % ["active" if bool(speaker.get("speech_detected", false)) else "inactive", _speaker_track_text(speaker), float(speaker.get("confidence", 0.0))])
 	lines.append("To Lumos: %s  DOA: %s" % [speaker_to_lumos, doa_text])
 	lines.append("Speaker reason: %s" % str(speaker.get("reason", "none")))

@@ -104,10 +104,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--memory-dedupe-window", type=float, default=8.0, help="Seconds to suppress repeated same-object/same-location memory writes.")
     parser.add_argument("--object-frame-dir", type=str, default="data/object_frames", help="Directory for saved object evidence frames.")
 
-    parser.add_argument("--enable-gestures", action="store_true", help="Enable MediaPipe hand gestures: index beckon moves Lumos closer; open palm moves it away.")
+    parser.add_argument("--enable-gestures", action="store_true", help="Enable MediaPipe hand gestures: beckon, palm push, thumbs up, pinch follow, and two-hand heart.")
     parser.add_argument("--gesture-interval", type=float, default=0.10, help="Seconds between hand-gesture detection passes.")
     parser.add_argument("--gesture-confidence", type=float, default=0.64, help="Minimum gesture confidence required to override the normal motion skill.")
     parser.add_argument("--gesture-hold", type=float, default=1.15, help="Seconds to hold the last gesture command after a brief hand landmark dropout.")
+    parser.add_argument("--gesture-max-hands", type=int, default=2, help="Maximum hands to track. Use 2 for two-hand heart gesture support.")
 
     parser.add_argument("--enable-audio", action="store_true", help="Enable non-blocking microphone capture for speaker awareness.")
     parser.add_argument("--list-audio-devices", action="store_true", help="List sounddevice input devices and exit. Use this to choose --audio-device.")
@@ -310,6 +311,7 @@ def build_configs(
     gesture_config = HandGestureConfig(
         enabled=args.enable_gestures,
         interval_s=max(0.04, args.gesture_interval),
+        max_num_hands=max(1, min(2, int(args.gesture_max_hands))),
         min_gesture_confidence=args.gesture_confidence,
         hold_s=max(0.0, args.gesture_hold),
     )
@@ -550,12 +552,13 @@ def main() -> int:
         object_config.confidence,
     )
     logger.info(
-        "Gesture config enabled=%s active=%s interval=%.2fs confidence=%.2f hold=%.2fs",
+        "Gesture config enabled=%s active=%s interval=%.2fs confidence=%.2f hold=%.2fs max_hands=%s",
         gesture_config.enabled,
         gesture_detector.enabled,
         gesture_config.interval_s,
         gesture_config.min_gesture_confidence,
         gesture_config.hold_s,
+        gesture_config.max_num_hands,
     )
     logger.info(
         "Memory config db=%s save_frames=%s dedupe_window=%.1fs",
@@ -805,12 +808,13 @@ def main() -> int:
                 gesture_result = gesture_detector.detect(frame, now=now)
                 gesture_detection_ms = round((time.perf_counter() - t0) * 1000.0, 3)
                 last_gesture_detection_at = now
-                if gesture_result.status in {"beckon", "palm_push"}:
+                if gesture_result.status in {"beckon", "palm_push", "thumbs_up", "pinch_follow", "heart"}:
                     logger.info(
-                        "Detected gesture status=%s confidence=%.3f reason=%s latency_ms=%.3f",
+                        "Detected gesture status=%s confidence=%.3f reason=%s target=%s latency_ms=%.3f",
                         gesture_result.status,
                         gesture_result.confidence,
                         gesture_result.reason,
+                        gesture_result.hand_center_norm,
                         gesture_detection_ms,
                     )
 
@@ -856,12 +860,23 @@ def main() -> int:
             t0 = time.perf_counter()
             behavior = behavior_for_transition(transition)
             gesture_payload = gesture_result.to_protocol_dict()
-            behavior = behavior_with_gesture_override(behavior, gesture_payload)
+            gesture_active = (
+                gesture_result.status in {"beckon", "palm_push", "thumbs_up", "pinch_follow", "heart"}
+                and gesture_result.confidence >= gesture_config.min_gesture_confidence
+            )
             speaker_payload = None if last_speaker_result is None else last_speaker_result.to_protocol_dict()
             t_policy = time.perf_counter()
-            speaker_policy_decision = apply_speaker_policy(behavior, last_speaker_result, transition.current_state, speaker_config)
+            if gesture_active and transition.current_state != LampState.RECALLING:
+                # Deliberate hand commands should control the lamp immediately.
+                # Active-speaker awareness resumes once the gesture drops out.
+                behavior = behavior_with_gesture_override(behavior, gesture_payload)
+                speaker_policy_decision = SpeakerPolicyDecision(behavior, False, "gesture_has_priority")
+                speaker_hold_behavior = None
+                speaker_hold_reason = "not_held"
+            else:
+                speaker_policy_decision = apply_speaker_policy(behavior, last_speaker_result, transition.current_state, speaker_config)
+                behavior = speaker_policy_decision.behavior
             speaker_policy_ms = round((time.perf_counter() - t_policy) * 1000.0, 3)
-            behavior = speaker_policy_decision.behavior
             if speaker_policy_decision.overridden:
                 speaker_hold_behavior = dict(behavior)
                 speaker_hold_reason = speaker_policy_decision.reason

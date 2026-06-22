@@ -85,6 +85,8 @@ var face_y_norm: float = -1.0
 var face_area_ratio: float = 0.0
 var gesture_status: String = "none"
 var gesture_confidence: float = 0.0
+var gesture_x_norm: float = -1.0
+var gesture_y_norm: float = -1.0
 var recall_target_found: bool = false
 var recall_point_x_norm: float = -1.0
 var recall_point_y_norm: float = -1.0
@@ -196,6 +198,8 @@ func apply_command(command: Dictionary) -> void:
 	var gesture: Dictionary = _dictionary_value(command, "gesture")
 	gesture_status = str(gesture.get("status", gesture_status))
 	gesture_confidence = float(gesture.get("confidence", gesture_confidence))
+	gesture_x_norm = _optional_norm_float(gesture, "target_x_norm", _optional_norm_float(gesture, "hand_x_norm", -1.0))
+	gesture_y_norm = _optional_norm_float(gesture, "target_y_norm", _optional_norm_float(gesture, "hand_y_norm", -1.0))
 
 	var speaker: Dictionary = _dictionary_value(command, "speaker")
 	_parse_speaker_command(speaker)
@@ -271,6 +275,9 @@ func _update_face_follow(delta: float) -> void:
 	if current_motion == "recall_point" and recall_target_found:
 		source_x = recall_point_x_norm
 		source_y = recall_point_y_norm
+	elif current_motion == "gesture_pinch_follow" and gesture_confidence >= 0.50:
+		source_x = gesture_x_norm
+		source_y = gesture_y_norm
 
 	var desired_x_deg: float = 0.0
 	var desired_y_deg: float = 0.0
@@ -367,7 +374,8 @@ func _can_use_distance_follow() -> bool:
 		return false
 	if engagement_status == "absent":
 		return false
-	if current_motion in ["gesture_approach", "gesture_retreat", "recall_point", "recall_not_found", "sleep_rest", "sleepy_search_then_rest", "sound_seek_left", "sound_seek_right", "sound_seek_center"]:
+	var skill: String = MotionSkillLibrary.normalize_motion(current_motion)
+	if skill in ["gesture_approach", "gesture_retreat", "gesture_thumbs_up", "gesture_pinch_follow", "gesture_heart_blush", "recall_point", "recall_not_found", "sleep_rest", "sleepy_search_then_rest", "sound_seek_left", "sound_seek_right", "sound_seek_center"]:
 		return false
 	return true
 

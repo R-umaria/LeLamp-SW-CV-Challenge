@@ -135,10 +135,10 @@ class ObjectDetectionConfig:
 
 @dataclass(frozen=True)
 class HandGestureConfig:
-    # Optional MediaPipe Hands path for deliberate gesture control.
+    # Optional MediaPipe Hands path for deliberate gesture and emotion control.
     enabled: bool = False
     interval_s: float = 0.10
-    max_num_hands: int = 1
+    max_num_hands: int = 2
     min_detection_confidence: float = 0.60
     min_tracking_confidence: float = 0.55
     min_gesture_confidence: float = 0.64
@@ -150,6 +150,16 @@ class HandGestureConfig:
     finger_extension_margin: float = 0.030
     finger_fold_margin: float = 0.005
     index_prominence_margin: float = 0.050
+    thumb_up_margin: float = 0.025
+
+    # Pinch follow: thumb/index tips close together become the control point.
+    pinch_tip_max_distance: float = 0.055
+    pinch_tip_max_distance_ratio: float = 0.52
+
+    # Two-hand heart gesture. These are intentionally forgiving for webcam demos.
+    heart_tip_pair_max_distance: float = 0.32
+    heart_center_max_gap: float = 0.46
+    heart_vertical_max_gap: float = 0.30
 
     # Temporal beckon detection: repeated index-tip movement within a short window.
     motion_window_s: float = 1.20

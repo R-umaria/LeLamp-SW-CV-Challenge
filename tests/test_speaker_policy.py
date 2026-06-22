@@ -47,3 +47,21 @@ def test_policy_uses_bounded_sound_seek_when_no_face_with_doa():
     decision = apply_speaker_policy(base, result, LampState.IDLE, config)
     assert decision.overridden is True
     assert decision.behavior["motion"] == "sound_seek_right"
+
+
+def test_gesture_policy_maps_new_emotion_controls():
+    from backend.behavior.behavior_policy import behavior_with_gesture_override
+
+    base = behavior_for_state(LampState.ENGAGED)
+
+    thumbs = behavior_with_gesture_override(base, {"status": "thumbs_up", "confidence": 0.86})
+    assert thumbs["motion"] == "gesture_thumbs_up"
+    assert thumbs["light"] == "happy_gold"
+
+    pinch = behavior_with_gesture_override(base, {"status": "pinch_follow", "confidence": 0.86, "target_x_norm": 0.2, "target_y_norm": 0.4})
+    assert pinch["motion"] == "gesture_pinch_follow"
+    assert pinch["light"] == "focus_glow"
+
+    heart = behavior_with_gesture_override(base, {"status": "heart", "confidence": 0.86})
+    assert heart["motion"] == "gesture_heart_blush"
+    assert heart["light"] == "baby_pink_blush"

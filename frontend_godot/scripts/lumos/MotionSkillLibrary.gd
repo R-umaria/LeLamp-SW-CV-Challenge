@@ -29,6 +29,12 @@ static func normalize_motion(motion: String) -> String:
 			return "gesture_approach"
 		"gesture_retreat", "palm_push", "move_away":
 			return "gesture_retreat"
+		"gesture_thumbs_up", "thumbs_up", "affirm", "approval":
+			return "gesture_thumbs_up"
+		"gesture_pinch_follow", "pinch_follow", "pinch":
+			return "gesture_pinch_follow"
+		"gesture_heart_blush", "heart", "heart_blush", "love":
+			return "gesture_heart_blush"
 		"recall_point", "point_to_object", "pointing":
 			return "recall_point"
 		"recall_not_found", "no_memory", "sad_no":
@@ -76,6 +82,12 @@ static func target_for(motion: String, t: float, elapsed_s: float) -> PackedFloa
 			return _gesture_approach(t)
 		"gesture_retreat":
 			return _gesture_retreat(t)
+		"gesture_thumbs_up":
+			return _gesture_thumbs_up(t)
+		"gesture_pinch_follow":
+			return _gesture_pinch_follow(t)
+		"gesture_heart_blush":
+			return _gesture_heart_blush(t)
 		"recall_point":
 			return _recall_point(t)
 		"recall_not_found":
@@ -119,6 +131,10 @@ static func smooth_speed_for(motion: String) -> float:
 			return 1.85
 		"gesture_approach", "gesture_retreat":
 			return 2.10
+		"gesture_thumbs_up", "gesture_pinch_follow":
+			return 2.05
+		"gesture_heart_blush":
+			return 1.45
 		"recall_point":
 			return 1.95
 		"recall_not_found":
@@ -139,7 +155,7 @@ static func smooth_speed_for(motion: String) -> float:
 
 static func blocks_face_follow(motion: String) -> bool:
 	var skill: String = normalize_motion(motion)
-	return skill == "sleep_rest" or skill == "sleepy_search_then_rest" or skill == "upset_turn" or skill == "recall_not_found"
+	return skill == "sleep_rest" or skill == "sleepy_search_then_rest" or skill == "upset_turn" or skill == "recall_not_found" or skill == "gesture_heart_blush"
 
 
 static func _target(
@@ -227,6 +243,23 @@ static func _gesture_approach(t: float) -> PackedFloat32Array:
 static func _gesture_retreat(t: float) -> PackedFloat32Array:
 	var recoil: float = maxf(0.0, sin(t * 0.95))
 	return _target(-8.0 * sin(t * 0.34), 48.0 + 5.0 * recoil, -112.0 - 5.0 * recoil, 30.0, -10.0, -18.0 - 3.0 * recoil, 0.18)
+
+
+static func _gesture_thumbs_up(t: float) -> PackedFloat32Array:
+	var bounce: float = maxf(0.0, sin(t * 1.38))
+	var nod: float = sin(t * 0.92)
+	return _target(8.0 * sin(t * 0.44), 20.0 - 4.0 * bounce, -56.0 - 4.0 * bounce, 12.0 + 4.5 * bounce, 10.0 * nod, 9.0 + 3.0 * bounce, 0.74)
+
+
+static func _gesture_pinch_follow(t: float) -> PackedFloat32Array:
+	var focus: float = sin(t * 0.58)
+	return _target(0.0, 25.0 + 1.0 * focus, -64.0 - 1.2 * focus, 15.0 + 0.8 * focus, 0.0, 5.0 + 1.0 * focus, 1.0)
+
+
+static func _gesture_heart_blush(t: float) -> PackedFloat32Array:
+	var shy: float = sin(t * 0.72)
+	var bob: float = maxf(0.0, sin(t * 1.06))
+	return _target(-14.0 + 5.0 * shy, 34.0 + 2.0 * bob, -82.0 - 2.0 * bob, 25.0, -18.0 + 7.0 * shy, -23.0 + 4.0 * bob, 0.0)
 
 
 static func _recall_point(t: float) -> PackedFloat32Array:

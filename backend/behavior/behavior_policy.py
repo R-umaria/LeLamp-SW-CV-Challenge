@@ -108,9 +108,9 @@ def behavior_for_transition(transition: StateTransition) -> dict:
 def behavior_with_gesture_override(base_behavior: Mapping, gesture: Mapping | None) -> dict:
     """Overlay deliberate hand-gesture control on top of normal behavior.
 
-    Gesture override is intentionally narrow: a beckon gesture maps to one known
-    approach skill, and an open palm maps to one known retreat skill. Memory,
-    recall, and engagement state remain owned by the backend pipeline.
+    The gesture layer remains bounded: each recognized gesture maps to one named
+    motion/light skill. The LLM does not control motion and Godot does not infer
+    intent from raw landmarks.
     """
 
     behavior = dict(base_behavior)
@@ -137,6 +137,33 @@ def behavior_with_gesture_override(base_behavior: Mapping, gesture: Mapping | No
                 "motion": "gesture_retreat",
                 "light": "soft_pulse",
                 "sound": None,
+                "speech_text": None,
+            }
+        )
+    elif status == "thumbs_up":
+        behavior.update(
+            {
+                "motion": "gesture_thumbs_up",
+                "light": "happy_gold",
+                "sound": "happy_ping",
+                "speech_text": None,
+            }
+        )
+    elif status == "pinch_follow":
+        behavior.update(
+            {
+                "motion": "gesture_pinch_follow",
+                "light": "focus_glow",
+                "sound": None,
+                "speech_text": None,
+            }
+        )
+    elif status == "heart":
+        behavior.update(
+            {
+                "motion": "gesture_heart_blush",
+                "light": "baby_pink_blush",
+                "sound": "happy_ping",
                 "speech_text": None,
             }
         )
