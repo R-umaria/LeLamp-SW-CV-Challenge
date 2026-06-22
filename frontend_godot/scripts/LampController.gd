@@ -18,13 +18,24 @@ const LightSkillLibrary = preload("res://scripts/lumos/LightSkillLibrary.gd")
 @export var face_follow_max_slew_degrees_per_second: float = 78.0
 @export var motion_time_scale: float = 0.48
 @export var smooth_speed_scale: float = 0.72
-@export var camera_approach_offset: Vector3 = Vector3(0.24, 0.0, -0.26)
-@export var root_shift_smooth_speed: float = 1.55
+# The base is physically planted: Lumos has no wheels. Distance correction must
+# fold/unfold the shoulder-elbow-wrist chain instead of translating the rig root.
+@export var planted_base_enabled: bool = true
+@export var planted_base_return_speed: float = 2.25
 @export var distance_follow_enabled: bool = true
 @export var desired_face_area_ratio: float = 0.070
 @export var close_face_area_ratio: float = 0.150
 @export var distance_follow_max_forward: float = 0.70
 @export var distance_follow_max_back: float = 0.72
+@export var distance_reach_smooth_speed: float = 1.55
+@export var distance_reach_shoulder_forward_degrees: float = -16.0
+@export var distance_reach_elbow_forward_degrees: float = 30.0
+@export var distance_reach_wrist_forward_degrees: float = -10.0
+@export var distance_reach_head_forward_degrees: float = 5.0
+@export var distance_reach_shoulder_back_degrees: float = 28.0
+@export var distance_reach_elbow_back_degrees: float = -52.0
+@export var distance_reach_wrist_back_degrees: float = 18.0
+@export var distance_reach_head_back_degrees: float = -10.0
 
 # Physical-style embodiment smoothing. Python still sends bounded behavior names;
 # Godot turns those behavior targets into actuator-safe motion profiles.
@@ -184,8 +195,9 @@ func apply_command(command: Dictionary) -> void:
 func _process(delta: float) -> void:
 	_time += delta
 	_update_face_follow(delta)
+	_update_distance_reach(delta)
 	_update_motion_targets()
-	_update_root_shift(delta)
+	_update_planted_root(delta)
 	_smooth_to_targets(delta)
 	_update_light(delta)
 
@@ -243,27 +255,41 @@ func _update_motion_targets() -> void:
 	_set_target_from_degrees(target_degrees)
 
 
-func _update_root_shift(delta: float) -> void:
+func _update_planted_root(delta: float) -> void:
+	# Real Lumos has no mobile base. Keep the rig root fixed and let arm joints
+	# express distance changes. If an older scene starts with a translated root,
+	# ease it home safely rather than snapping.
+	_target_root_position = _home_position
+	if planted_base_enabled:
+		if physical_motion_enabled:
+			position = _smooth_vector_profile(position, _target_root_position, delta)
+		else:
+			var weight: float = clampf(delta * planted_base_return_speed, 0.0, 1.0)
+			position = position.lerp(_target_root_position, weight)
+			_root_velocity = Vector3.ZERO
+			_root_acceleration = Vector3.ZERO
+		return
+
+	# Non-physical legacy mode retained only for visual experiments. Keep disabled
+	# for the final robot-like demo.
 	var scaled_time: float = _time * motion_time_scale
 	var motion_elapsed_s: float = maxf(0.0, _time - _motion_started_at)
 	var behavior_shift: float = MotionSkillLibrary.root_shift_for(current_motion, scaled_time, motion_elapsed_s)
-	var distance_shift: float = _distance_shift_for_face(delta)
-	var shift: float = clampf(behavior_shift + distance_shift, -1.0, 1.0)
-	_target_root_position = _home_position + camera_approach_offset * shift
+	var shift: float = clampf(behavior_shift, -1.0, 1.0)
+	_target_root_position = _home_position + Vector3(0.24, 0.0, -0.26) * shift
 	if physical_motion_enabled:
 		position = _smooth_vector_profile(position, _target_root_position, delta)
 	else:
-		var weight: float = clampf(delta * root_shift_smooth_speed, 0.0, 1.0)
-		position = position.lerp(_target_root_position, weight)
+		var legacy_weight: float = clampf(delta * planted_base_return_speed, 0.0, 1.0)
+		position = position.lerp(_target_root_position, legacy_weight)
 		_root_velocity = Vector3.ZERO
 		_root_acceleration = Vector3.ZERO
 
 
-func _distance_shift_for_face(delta: float) -> float:
-	# Keep a comfortable apparent distance during attentive tracking. A small face
-	# box means the user is far away, so Lumos slides forward. A very large face
-	# box means the user is close, so Lumos gives them space. Gesture and recall
-	# motions own root movement and therefore suppress this automatic correction.
+func _update_distance_reach(delta: float) -> void:
+	# Keep a comfortable apparent distance during attentive tracking using only
+	# arm articulation. A small face box means the user is far away, so the arm
+	# unfolds. A large face box means the user is close, so the arm folds inward.
 	var desired_shift: float = 0.0
 	if distance_follow_enabled and _can_use_distance_follow():
 		if face_area_ratio < desired_face_area_ratio:
@@ -273,9 +299,8 @@ func _distance_shift_for_face(delta: float) -> float:
 			var close_error: float = (face_area_ratio - close_face_area_ratio) / maxf(close_face_area_ratio, 0.001)
 			desired_shift = -clampf(close_error, 0.0, distance_follow_max_back)
 
-	var weight: float = clampf(delta * root_shift_smooth_speed * 0.70, 0.0, 1.0)
+	var weight: float = clampf(delta * distance_reach_smooth_speed * 0.70, 0.0, 1.0)
 	_smoothed_distance_shift = lerpf(_smoothed_distance_shift, desired_shift, weight)
-	return _smoothed_distance_shift
 
 
 func _can_use_distance_follow() -> bool:
@@ -295,12 +320,37 @@ func _set_target_from_degrees(target_degrees: PackedFloat32Array) -> void:
 	var follow_x_deg: float = _smoothed_face_follow_x_deg * follow_weight
 	var follow_y_deg: float = _smoothed_face_follow_y_deg * follow_weight
 
-	var base_yaw_deg: float = clampf(target_degrees[0] + follow_x_deg, -155.0, 155.0)
-	var shoulder_pitch_deg: float = clampf(target_degrees[1] - follow_y_deg * 0.28, -100.0, 100.0)
-	var elbow_pitch_deg: float = clampf(target_degrees[2], -150.0, 115.0)
-	var wrist_pitch_deg: float = clampf(target_degrees[3] - follow_y_deg * 0.34, -85.0, 85.0)
-	var wrist_yaw_deg: float = clampf(target_degrees[4] + follow_x_deg * 0.46, -95.0, 95.0)
-	var head_tilt_deg: float = clampf(target_degrees[5] + follow_y_deg * 0.88, -62.0, 46.0)
+	var base_yaw_deg: float = target_degrees[0] + follow_x_deg
+	var shoulder_pitch_deg: float = target_degrees[1] - follow_y_deg * 0.28
+	var elbow_pitch_deg: float = target_degrees[2]
+	var wrist_pitch_deg: float = target_degrees[3] - follow_y_deg * 0.34
+	var wrist_yaw_deg: float = target_degrees[4] + follow_x_deg * 0.46
+	var head_tilt_deg: float = target_degrees[5] + follow_y_deg * 0.88
+
+	# Distance maintenance is applied as a lightweight 2D IK-style reach offset.
+	# Positive shift unfolds the shoulder/elbow to reach toward a far user; negative
+	# shift folds the arm back when the face box is too large/close. Wrist/head
+	# compensation keeps the lamp's focus axis visually locked on the face.
+	var reach_shift: float = clampf(_smoothed_distance_shift, -distance_follow_max_back, distance_follow_max_forward)
+	if reach_shift > 0.001:
+		shoulder_pitch_deg += reach_shift * distance_reach_shoulder_forward_degrees
+		elbow_pitch_deg += reach_shift * distance_reach_elbow_forward_degrees
+		wrist_pitch_deg += reach_shift * distance_reach_wrist_forward_degrees
+		head_tilt_deg += reach_shift * distance_reach_head_forward_degrees
+	elif reach_shift < -0.001:
+		var back_shift: float = -reach_shift
+		shoulder_pitch_deg += back_shift * distance_reach_shoulder_back_degrees
+		elbow_pitch_deg += back_shift * distance_reach_elbow_back_degrees
+		wrist_pitch_deg += back_shift * distance_reach_wrist_back_degrees
+		head_tilt_deg += back_shift * distance_reach_head_back_degrees
+
+	base_yaw_deg = clampf(base_yaw_deg, -155.0, 155.0)
+	shoulder_pitch_deg = clampf(shoulder_pitch_deg, -100.0, 100.0)
+	elbow_pitch_deg = clampf(elbow_pitch_deg, -150.0, 115.0)
+	wrist_pitch_deg = clampf(wrist_pitch_deg, -85.0, 85.0)
+	wrist_yaw_deg = clampf(wrist_yaw_deg, -95.0, 95.0)
+	head_tilt_deg = clampf(head_tilt_deg, -62.0, 46.0)
+
 	var degrees: PackedFloat32Array = PackedFloat32Array([
 		base_yaw_deg,
 		shoulder_pitch_deg,

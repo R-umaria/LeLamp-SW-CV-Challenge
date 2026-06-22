@@ -236,6 +236,18 @@ The editable lamp rig no longer includes the two debug orientation markers that 
 
 These nodes were useful while checking the lamp's facing direction, but they are not required for UDP behavior, light color changes, recall display, or animation. The final scene now keeps only the actual `LampSpotLight` and translucent `VisibleLightCone`.
 
+## Milestone 4.10 planted base arm reach
+
+Distance-follow no longer translates the whole `LampRig` root. Lumos now keeps its base planted and maintains face distance by folding/unfolding the shoulder, elbow, wrist, and head joints. This better matches a real 6-DOF lamp/arm: no wheels, no sliding base, only articulated reach.
+
+Useful inspector parameters on `LampRig`:
+
+- `planted_base_enabled`: keep the base fixed at its scene-authored position.
+- `distance_follow_enabled`: enable face-box-size distance control.
+- `desired_face_area_ratio` and `close_face_area_ratio`: tune when Lumos reaches forward or folds back.
+- `distance_reach_smooth_speed`: smooth the reach/fold command.
+- `distance_reach_*_degrees`: tune shoulder, elbow, wrist, and head compensation.
+
 ## Milestone 4.9 physical motion smoothing
 
 The frontend now treats the lamp as a physical actuator system instead of only a visual animation. `LampController.gd` still receives the same bounded backend motion names, but it converts target pose changes into safe transitions using:
@@ -243,7 +255,7 @@ The frontend now treats the lamp as a physical actuator system instead of only a
 - quintic S-curve blending between behavior states;
 - per-joint velocity, acceleration, and jerk limits;
 - slew-limited face-follow input;
-- profiled root/forward-back movement;
+- planted-base arm reach for face-distance control;
 - slew-limited light color and brightness changes.
 
 Useful inspector parameters on `LampRig`:

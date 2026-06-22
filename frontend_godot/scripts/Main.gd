@@ -225,7 +225,7 @@ func _refresh_debug_ui() -> void:
 	var face_area_text: String = _optional_debug_value(engagement.get("face_area_ratio", null))
 
 	var lines: Array[String] = []
-	lines.append("Lumos Milestone 4.9 Physical Motion Smoothing")
+	lines.append("Lumos Milestone 4.10 Planted Base Arm Reach")
 	lines.append("UDP: %s" % _receiver_status)
 	lines.append("Lumos browser chat: http://127.0.0.1:8765")
 	lines.append("Health: %s  age: %.1fs" % [connection_health, packet_age_s])
@@ -243,7 +243,7 @@ func _refresh_debug_ui() -> void:
 			_optional_debug_value(recall_target.get("point_y_norm", null)),
 		])
 	lines.append("Recall panel: %s" % ("visible" if _response_panel != null and _response_panel.visible else "hidden"))
-	lines.append("Motion safety: S-curve blend + velocity/accel/jerk limits")
+	lines.append("Motion safety: planted base + S-curve joint limits")
 	if speech_text != "":
 		lines.append("Speech: %s" % speech_text)
 

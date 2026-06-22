@@ -293,3 +293,7 @@ python -m backend.main --show-window --godot-udp --enable-gestures --enable-obje
 ```
 
 See `docs/milestone4_8_recall_hold_distance_follow.md` for implementation details.
+
+## Milestone 4.10 planted base distance control
+
+The Godot frontend now keeps Lumos' base planted during face-distance correction. The old forward/back root translation has been replaced with a joint-level reach layer: shoulder and elbow fold/unfold while wrist pitch and head tilt compensate to keep the lamp focused on the detected face. This keeps the simulation closer to a real 6-DOF lamp/robot arm with no wheels.

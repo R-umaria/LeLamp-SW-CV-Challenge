@@ -84,18 +84,10 @@ static func target_for(motion: String, t: float, elapsed_s: float) -> PackedFloa
 			return _idle_breathe(t)
 
 
-static func root_shift_for(motion: String, t: float, _elapsed_s: float) -> float:
-	# Unitless value consumed by LampController. Positive moves toward the camera;
-	# negative moves away. The small oscillation makes gesture control feel alive
-	# without introducing unbounded translation.
-	var skill: String = normalize_motion(motion)
-	match skill:
-		"gesture_approach":
-			return 1.0 + 0.05 * sin(t * 1.8)
-		"gesture_retreat":
-			return -0.85 + 0.04 * sin(t * 1.2)
-		_:
-			return 0.0
+static func root_shift_for(_motion: String, _t: float, _elapsed_s: float) -> float:
+	# Physical mode keeps the base planted. Legacy root translation is intentionally
+	# disabled; approach/retreat expression comes from shoulder/elbow/wrist poses.
+	return 0.0
 
 
 static func smooth_speed_for(motion: String) -> float:
