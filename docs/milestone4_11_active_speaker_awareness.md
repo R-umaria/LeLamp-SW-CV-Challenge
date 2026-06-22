@@ -221,3 +221,58 @@ Recommended upgrade path for true ML-based active speaker detection:
 3. Integrate a lightweight pre-trained active speaker detector behind the same `ActiveSpeakerResult` interface.
 4. Keep the current heuristic path as fallback for missing models or low-confidence ML predictions.
 5. Add calibrated thresholds and confusion matrix reporting for single-user and two-user scenes.
+
+## Milestone 4.11.1 hotfix: audio dependency + parallel speaker worker
+
+Diagnosis from the attached run logs:
+
+- Audio never started because Python could not import `sounddevice`:
+
+```text
+speaker_awareness_disabled_reason reason=sounddevice_unavailable: No module named 'sounddevice'
+```
+
+- Because no audio chunks reached VAD, every speaker command remained:
+
+```text
+reason=no_voice_activity_result
+```
+
+- The first 4.11 implementation ran face tracking and speaker fusion inside the camera loop. The log showed repeated `fusion_ms` values around 50-140 ms, which is enough to make the preview feel laggy.
+
+Changes in this hotfix:
+
+1. Added `backend/perception/speaker_awareness_worker.py`.
+2. Speaker fusion now runs in a latest-frame-only worker thread, not in the main camera/FSM/Godot loop.
+3. The worker downsizes its own frame to `--speaker-frame-width` before face tracking.
+4. The main loop submits frames to the worker only at `--speaker-fusion-interval` instead of every frame.
+5. Voice/DOA logging is throttled so audio processing does not flood runtime logs.
+6. Audio capture now tries stereo first when DOA is enabled, but falls back to mono VAD if stereo cannot open.
+7. Audio capture now tries the device default sample rate if the requested sample rate cannot open.
+8. Added `--list-audio-devices` to diagnose microphone availability.
+
+Before running speaker awareness, install requirements from the project root:
+
+```powershell
+python -m pip install -r backend/requirements.txt
+```
+
+Then verify that Python can see your microphone:
+
+```powershell
+python -m backend.main --list-audio-devices
+```
+
+Recommended stable run:
+
+```powershell
+python -m backend.main --show-window --godot-udp --enable-objects --enable-web-chat --enable-audio --enable-speaker-awareness --preview-flip-horizontal --speaker-fusion-interval 0.25 --speaker-frame-width 640
+```
+
+Stereo DOA run:
+
+```powershell
+python -m backend.main --show-window --godot-udp --enable-objects --enable-web-chat --enable-audio --enable-speaker-awareness --enable-doa --mic-distance-m 0.08 --preview-flip-horizontal --speaker-fusion-interval 0.25 --speaker-frame-width 640
+```
+
+If the stereo command falls back to mono, Lumos should still detect speech activity and active visible speaker, but `doa_azimuth_deg` will remain unavailable.

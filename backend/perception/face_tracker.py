@@ -115,6 +115,11 @@ class FaceTracker:
             minSize=self.engagement_config.cascade_min_size,
         )
         bboxes = self._filter_faces(faces, width, height)
+        if engagement_result is not None and engagement_result.face_bbox is not None:
+            # The engagement detector already selected the most stable primary face.
+            # Anchor speaker tracks to that bbox so the speaker system does not chase
+            # Haar false positives around the room while the user is clearly centered.
+            bboxes = self._merge_primary_engagement_bbox(bboxes, engagement_result.face_bbox)
         mesh_estimates = self._facemesh_mouth_estimates(frame) if self._facemesh_available else []
 
         matched_ids: set[str] = set()
@@ -162,6 +167,17 @@ class FaceTracker:
                 continue
             out.append((x, y, w, h))
         return out
+
+    def _merge_primary_engagement_bbox(self, bboxes: list[BBox], primary_bbox: BBox) -> list[BBox]:
+        merged: list[BBox] = [primary_bbox]
+        for bbox in bboxes:
+            # Drop near-duplicates of the primary engagement face. Keep other
+            # faces for multi-person awareness, but the centered engagement face
+            # should be the most stable candidate.
+            if _bbox_iou(bbox, primary_bbox) >= 0.18:
+                continue
+            merged.append(bbox)
+        return merged
 
     def _match_existing_track(self, bbox: BBox, center_norm: tuple[float, float], now_s: float) -> _MutableTrack | None:
         best_track = None

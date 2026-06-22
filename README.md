@@ -315,3 +315,25 @@ python -m backend.main --show-window --godot-udp --enable-objects --enable-web-c
 ```
 
 Speaker events are logged to `logs/runs/<run_id>/speaker_events.jsonl` and mirrored to `logs/latest/speaker_events.jsonl` unless `--no-latest` is used. See `docs/milestone4_11_active_speaker_awareness.md` for details.
+
+### Milestone 4.11.1 audio/speaker hotfix
+
+Before using active speaker awareness, install the audio dependency:
+
+```powershell
+python -m pip install -r backend/requirements.txt
+```
+
+Check microphone visibility:
+
+```powershell
+python -m backend.main --list-audio-devices
+```
+
+Recommended speaker run after the hotfix:
+
+```powershell
+python -m backend.main --show-window --godot-udp --enable-objects --enable-web-chat --enable-audio --enable-speaker-awareness --preview-flip-horizontal --speaker-fusion-interval 0.25 --speaker-frame-width 640
+```
+
+The hotfix moves speaker fusion into a latest-frame-only worker thread. This keeps face/mouth speaker analysis from blocking the camera preview and Godot command loop. If `--enable-doa` is used but stereo input cannot open, Lumos falls back to mono VAD instead of disabling all audio.

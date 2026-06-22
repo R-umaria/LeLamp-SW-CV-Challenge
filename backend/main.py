@@ -40,9 +40,9 @@ from backend.conversation.web_chat_server import WebChatRequest, WebChatServer
 from backend.evaluation.latency_logger import LatencyLogger
 from backend.memory.scene_memory import SceneMemory
 from backend.perception.camera import OpenCVCamera
-from backend.perception.active_speaker_detector import ActiveSpeakerDetector, ActiveSpeakerResult
+from backend.perception.active_speaker_detector import ActiveSpeakerResult
 from backend.perception.engagement_detector import FaceEngagementDetector
-from backend.perception.face_tracker import FaceTracker
+from backend.perception.speaker_awareness_worker import SpeakerAwarenessWorker
 from backend.perception.gesture_detector import HandGestureDetector, HandGestureResult
 from backend.perception.object_detector import YoloObjectDetector
 from backend.perception.temporal_smoother import EngagementSmoother
@@ -108,6 +108,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gesture-hold", type=float, default=1.15, help="Seconds to hold the last gesture command after a brief hand landmark dropout.")
 
     parser.add_argument("--enable-audio", action="store_true", help="Enable non-blocking microphone capture for speaker awareness.")
+    parser.add_argument("--list-audio-devices", action="store_true", help="List sounddevice input devices and exit. Use this to choose --audio-device.")
     parser.add_argument("--enable-speaker-awareness", action="store_true", help="Enable active speaker awareness fusion and behavior overrides.")
     parser.add_argument("--audio-device", type=str, default=None, help="Optional sounddevice input device id/name. Defaults to system input.")
     parser.add_argument("--audio-sample-rate", type=int, default=16000, help="Audio sample rate for VAD/DOA.")
@@ -115,6 +116,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--vad-energy-threshold", type=float, default=2.4, help="RMS multiplier over rolling noise floor for speech activity.")
     parser.add_argument("--enable-doa", action="store_true", help="Enable stereo GCC-PHAT direction of arrival when stereo input is available.")
     parser.add_argument("--mic-distance-m", type=float, default=0.08, help="Distance between left/right microphones in meters for DOA.")
+    parser.add_argument("--speaker-fusion-interval", type=float, default=0.25, help="Seconds between active-speaker fusion passes. Runs in a worker thread by default.")
+    parser.add_argument("--speaker-frame-width", type=int, default=640, help="Max frame width for speaker face tracking worker. Lower improves preview FPS.")
     parser.add_argument("--speaker-debug", action="store_true", help="Log detailed face-track and speaker-fusion diagnostics.")
 
     parser.add_argument("--interactive-recall", action="store_true", help="Debug only: allow terminal recall questions while the backend is running.")
@@ -312,6 +315,8 @@ def build_configs(
     speaker_config = SpeakerAwarenessConfig(
         enabled=args.enable_speaker_awareness,
         debug=args.speaker_debug,
+        fusion_interval_s=max(0.05, float(args.speaker_fusion_interval)),
+        worker_frame_width=max(160, int(args.speaker_frame_width)),
     )
     return (
         camera_config,
@@ -331,6 +336,10 @@ def build_configs(
 
 def main() -> int:
     args = parse_args()
+    if args.list_audio_devices:
+        ok, message = AudioCaptureWorker.list_input_devices()
+        print(message)
+        return 0 if ok else 2
     (
         camera_config,
         engagement_config,
@@ -376,8 +385,12 @@ def main() -> int:
     scene_memory = SceneMemory(memory_config, logger=logger)
     audio_capture = AudioCaptureWorker(audio_config, logger=logger)
     voice_detector = VoiceActivityDetector(audio_config)
-    face_tracker = FaceTracker(engagement_config, speaker_config, logger=logger)
-    speaker_detector = ActiveSpeakerDetector(speaker_config)
+    speaker_worker = SpeakerAwarenessWorker(
+        engagement_config,
+        speaker_config,
+        logger=logger,
+        event_paths=speaker_event_paths,
+    )
     preview_window = PreviewWindow(
         PreviewWindowConfig(
             title="Lumos - CV Preview",
@@ -527,7 +540,7 @@ def main() -> int:
         args.ollama_keep_alive,
     )
     logger.info(
-        "Speaker awareness config audio_enabled=%s speaker_enabled=%s doa_enabled=%s device=%s sample_rate=%s block_ms=%s vad_threshold=%.2f mic_distance_m=%.3f",
+        "Speaker awareness config audio_enabled=%s speaker_enabled=%s doa_enabled=%s device=%s sample_rate=%s block_ms=%s vad_threshold=%.2f mic_distance_m=%.3f fusion_interval=%.3f worker_frame_width=%s",
         audio_config.enabled,
         speaker_config.enabled,
         doa_config.enabled,
@@ -536,6 +549,8 @@ def main() -> int:
         audio_config.block_ms,
         audio_config.vad_energy_threshold,
         doa_config.mic_distance_m,
+        speaker_config.fusion_interval_s,
+        speaker_config.worker_frame_width,
     )
     if speaker_config.enabled and not audio_config.enabled:
         reason_payload = {"event": "speaker_awareness_disabled_reason", "reason": "enable_speaker_awareness_without_enable_audio"}
@@ -548,12 +563,16 @@ def main() -> int:
     last_emit_at = 0.0
     last_object_detection_at = 0.0
     last_gesture_detection_at = 0.0
-    last_speaker_fusion_at = 0.0
     last_audio_sequence = -1
+    last_speaker_snapshot_sequence = -1
+    last_speaker_submit_at = 0.0
+    last_voice_log_at = 0.0
+    last_voice_signature = None
+    last_doa_log_at = 0.0
+    last_doa_signature = None
     last_voice_result: VoiceActivityResult | None = None
     last_doa_result: DirectionOfArrivalResult | None = None
     last_speaker_result: ActiveSpeakerResult | None = None
-    face_tracks = []
     speaker_policy_decision = SpeakerPolicyDecision({}, False, "not_evaluated")
     gesture_result = HandGestureResult("unavailable", 0.0, "gesture_detection_disabled")
     fps_ema = 0.0
@@ -563,8 +582,16 @@ def main() -> int:
     display_detections = []
 
     try:
+        audio_started = False
         if audio_config.enabled:
-            audio_capture.start()
+            audio_started = audio_capture.start()
+        if speaker_config.enabled and audio_config.enabled and audio_started:
+            speaker_worker.start()
+        elif speaker_config.enabled and audio_config.enabled and not audio_started:
+            append_jsonl(
+                speaker_event_paths,
+                {"event": "speaker_awareness_disabled_reason", "reason": audio_capture.disabled_reason or "audio_capture_unavailable"},
+            )
         camera.open()
         while True:
             loop_start = time.perf_counter()
@@ -604,19 +631,28 @@ def main() -> int:
                         t_audio = time.perf_counter()
                         last_voice_result = voice_detector.update(latest_audio)
                         vad_ms = round((time.perf_counter() - t_audio) * 1000.0, 3)
-                        append_jsonl(
-                            speaker_event_paths,
-                            {"event": "voice_activity", **last_voice_result.to_log_dict()},
+                        voice_signature = bool(last_voice_result.is_speech)
+                        should_log_voice = (
+                            voice_signature != last_voice_signature
+                            or last_voice_result.is_speech
+                            or (now - last_voice_log_at) >= 0.75
                         )
-                        logger.info(
-                            "voice_activity active=%s confidence=%.3f rms=%.6f noise_floor=%.6f channels=%s latency_ms=%s",
-                            last_voice_result.is_speech,
-                            last_voice_result.confidence,
-                            last_voice_result.rms,
-                            last_voice_result.noise_floor,
-                            last_voice_result.channels,
-                            vad_ms,
-                        )
+                        if should_log_voice:
+                            append_jsonl(
+                                speaker_event_paths,
+                                {"event": "voice_activity", **last_voice_result.to_log_dict()},
+                            )
+                            logger.info(
+                                "voice_activity active=%s confidence=%.3f rms=%.6f noise_floor=%.6f channels=%s latency_ms=%s",
+                                last_voice_result.is_speech,
+                                last_voice_result.confidence,
+                                last_voice_result.rms,
+                                last_voice_result.noise_floor,
+                                last_voice_result.channels,
+                                vad_ms,
+                            )
+                            last_voice_log_at = now
+                            last_voice_signature = voice_signature
                         if doa_config.enabled:
                             t_doa = time.perf_counter()
                             last_doa_result = estimate_direction_of_arrival(
@@ -628,18 +664,27 @@ def main() -> int:
                                 min_confidence=doa_config.min_confidence,
                             )
                             doa_ms = round((time.perf_counter() - t_doa) * 1000.0, 3)
-                            append_jsonl(
-                                speaker_event_paths,
-                                {"event": "doa_result", **last_doa_result.to_log_dict()},
+                            doa_signature = (last_doa_result.available, last_doa_result.reason)
+                            should_log_doa = (
+                                doa_signature != last_doa_signature
+                                or last_doa_result.available
+                                or (now - last_doa_log_at) >= 0.75
                             )
-                            logger.info(
-                                "doa_result available=%s azimuth=%s confidence=%.3f reason=%s latency_ms=%s",
-                                last_doa_result.available,
-                                last_doa_result.azimuth_deg,
-                                last_doa_result.confidence,
-                                last_doa_result.reason,
-                                doa_ms,
-                            )
+                            if should_log_doa:
+                                append_jsonl(
+                                    speaker_event_paths,
+                                    {"event": "doa_result", **last_doa_result.to_log_dict()},
+                                )
+                                logger.info(
+                                    "doa_result available=%s azimuth=%s confidence=%.3f reason=%s latency_ms=%s",
+                                    last_doa_result.available,
+                                    last_doa_result.azimuth_deg,
+                                    last_doa_result.confidence,
+                                    last_doa_result.reason,
+                                    doa_ms,
+                                )
+                                last_doa_log_at = now
+                                last_doa_signature = doa_signature
 
             should_detect_objects = object_detector.enabled and (
                 last_object_detection_at == 0.0 or (now - last_object_detection_at >= object_config.interval_s)
@@ -695,39 +740,22 @@ def main() -> int:
                         gesture_detection_ms,
                     )
 
-            if speaker_config.enabled and audio_config.enabled and (
-                last_speaker_fusion_at == 0.0 or (now - last_speaker_fusion_at >= speaker_config.fusion_interval_s)
-            ):
-                t0 = time.perf_counter()
-                face_tracks = face_tracker.update(frame, engagement_result=raw_engagement, now=now)
-                last_speaker_result = speaker_detector.update(
-                    face_tracks,
-                    last_voice_result,
-                    last_doa_result,
-                    raw_engagement,
-                    now=time.time(),
-                )
-                active_speaker_fusion_ms = round((time.perf_counter() - t0) * 1000.0, 3)
-                last_speaker_fusion_at = now
-                append_jsonl(
-                    speaker_event_paths,
-                    {
-                        "event": "speaker_result",
-                        **last_speaker_result.to_log_dict(),
-                        "face_tracks": [track.to_log_dict() for track in face_tracks],
-                    },
-                )
-                logger.info(
-                    "speaker_result speech=%s track=%s to_robot=%s confidence=%.3f reason=%s fusion_ms=%s",
-                    last_speaker_result.speech_detected,
-                    last_speaker_result.active_track_id,
-                    last_speaker_result.speaking_to_robot,
-                    last_speaker_result.confidence,
-                    last_speaker_result.reason,
-                    active_speaker_fusion_ms,
-                )
-                if speaker_config.debug:
-                    logger.info("speaker_debug face_tracks=%s", [track.to_log_dict() for track in face_tracks])
+            if speaker_config.enabled and audio_config.enabled and speaker_worker.enabled:
+                if last_speaker_submit_at == 0.0 or (now - last_speaker_submit_at) >= speaker_config.fusion_interval_s:
+                    speaker_worker.submit(
+                        frame_sequence=frame_count,
+                        frame=frame,
+                        engagement=raw_engagement,
+                        voice=last_voice_result,
+                        doa=last_doa_result,
+                    )
+                    last_speaker_submit_at = now
+                speaker_snapshot = speaker_worker.snapshot()
+                if speaker_snapshot.result is not None:
+                    last_speaker_result = speaker_snapshot.result
+                    if speaker_snapshot.frame_sequence != last_speaker_snapshot_sequence:
+                        active_speaker_fusion_ms = speaker_snapshot.fusion_ms
+                        last_speaker_snapshot_sequence = speaker_snapshot.frame_sequence
 
             t0 = time.perf_counter()
             smoothed_engagement = smoother.update(raw_engagement)
@@ -1054,7 +1082,7 @@ def main() -> int:
         if web_chat_server is not None:
             web_chat_server.stop()
         gesture_detector.close()
-        face_tracker.close()
+        speaker_worker.stop()
         audio_capture.stop()
         godot_sender.close()
         camera.release()

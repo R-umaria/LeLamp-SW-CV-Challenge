@@ -199,7 +199,9 @@ class DirectionOfArrivalConfig:
 class SpeakerAwarenessConfig:
     enabled: bool = False
     debug: bool = False
-    fusion_interval_s: float = 0.12
+    fusion_interval_s: float = 0.25
+    worker_frame_width: int = 640
+    worker_log_interval_s: float = 1.0
     policy_min_confidence: float = 0.55
     mouth_motion_threshold: float = 0.18
     ambiguous_margin: float = 0.12
