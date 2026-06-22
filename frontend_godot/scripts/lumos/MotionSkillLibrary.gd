@@ -269,3 +269,20 @@ static func _dance_loop(t: float) -> PackedFloat32Array:
 static func _upset_turn(t: float) -> PackedFloat32Array:
 	var droop: float = 1.4 * sin(t * 0.30)
 	return _target(118.0, 42.0 + droop, -98.0, 28.0, -28.0, -35.0 + droop, 0.0)
+
+
+static func _active_listen(t: float) -> PackedFloat32Array:
+	var attentive_nod: float = sin(t * 0.62)
+	var micro: float = sin(t * 0.30)
+	return _target(1.0 * micro, 22.0 + 1.0 * attentive_nod, -58.0 - 1.4 * attentive_nod, 13.0 + 0.8 * attentive_nod, 0.0, 7.0 + 1.2 * attentive_nod, 1.0)
+
+
+static func _listening_attentive(t: float) -> PackedFloat32Array:
+	var breathe: float = sin(t * 0.42)
+	return _target(5.0 * sin(t * 0.24), 31.0 + 1.4 * breathe, -76.0 - 1.6 * breathe, 22.0, 6.0 * sin(t * 0.28), -3.0 + 1.3 * breathe, 0.34)
+
+
+static func _sound_seek(t: float) -> PackedFloat32Array:
+	# LampController injects a clamped DOA/default yaw through the face-follow channel.
+	var lift: float = sin(t * 0.50)
+	return _target(0.0, 30.0 + 3.0 * lift, -78.0 - 3.0 * lift, 24.0 + 2.0 * lift, 0.0, -5.0 + 2.0 * lift, 1.0)
