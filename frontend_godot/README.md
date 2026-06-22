@@ -235,3 +235,25 @@ The editable lamp rig no longer includes the two debug orientation markers that 
 - `LookDirectionTip`
 
 These nodes were useful while checking the lamp's facing direction, but they are not required for UDP behavior, light color changes, recall display, or animation. The final scene now keeps only the actual `LampSpotLight` and translucent `VisibleLightCone`.
+
+## Milestone 4.9 physical motion smoothing
+
+The frontend now treats the lamp as a physical actuator system instead of only a visual animation. `LampController.gd` still receives the same bounded backend motion names, but it converts target pose changes into safe transitions using:
+
+- quintic S-curve blending between behavior states;
+- per-joint velocity, acceleration, and jerk limits;
+- slew-limited face-follow input;
+- profiled root/forward-back movement;
+- slew-limited light color and brightness changes.
+
+Useful inspector parameters on `LampRig`:
+
+- `physical_motion_enabled`: turn the physical profile on/off.
+- `transition_blend_seconds`: base transition time between behavior states.
+- `servo_max_velocity_degrees_per_second`: max joint speed.
+- `servo_max_acceleration_degrees_per_second2`: max joint acceleration.
+- `servo_max_jerk_degrees_per_second3`: max change in acceleration.
+- `face_follow_max_slew_degrees_per_second`: max face-tracking command change.
+- `light_color_slew_per_second` and `light_energy_slew_per_second`: lamp output ramp rates.
+
+For final demo recording, keep `physical_motion_enabled` enabled. If the lamp feels too conservative, raise velocity/acceleration/jerk slightly; if it feels jerky, lower them or raise `transition_blend_seconds`.
