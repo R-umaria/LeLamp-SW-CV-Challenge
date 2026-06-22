@@ -14,6 +14,9 @@ const LightSkillLibrary = preload("res://scripts/lumos/LightSkillLibrary.gd")
 
 @export var face_follow_max_degrees: float = 82.0
 @export var face_follow_vertical_max_degrees: float = 46.0
+@export var speaker_doa_max_degrees: float = 90.0
+@export var speaker_doa_hold_seconds: float = 1.35
+@export var speaker_seek_default_degrees: float = 52.0
 @export var face_follow_smooth_speed: float = 1.85
 @export var face_follow_max_slew_degrees_per_second: float = 78.0
 @export var motion_time_scale: float = 0.48
@@ -86,11 +89,20 @@ var recall_target_found: bool = false
 var recall_point_x_norm: float = -1.0
 var recall_point_y_norm: float = -1.0
 var recall_location_label: String = ""
+var speaker_speech_detected: bool = false
+var speaker_active_track_id: String = ""
+var speaker_active_track_location: String = ""
+var speaker_speaking_to_robot: String = "unknown"
+var speaker_confidence: float = 0.0
+var speaker_reason: String = ""
+var speaker_doa_has_hint: bool = false
+var speaker_doa_azimuth_deg: float = 0.0
 
 var _time: float = 0.0
 var _motion_started_at: float = 0.0
 var _smoothed_face_follow_x_deg: float = 0.0
 var _smoothed_face_follow_y_deg: float = 0.0
+var _speaker_doa_valid_until: float = -1000.0
 var _home_position: Vector3 = Vector3.ZERO
 var _target_root_position: Vector3 = Vector3.ZERO
 var _smoothed_distance_shift: float = 0.0
@@ -126,6 +138,7 @@ func _ready() -> void:
 		"state": "idle",
 		"engagement": {"status": "absent", "confidence": 0.0},
 		"gesture": {"status": "none", "confidence": 0.0},
+		"speaker": {"speech_detected": false, "active_track_id": null, "speaking_to_robot": null, "confidence": 0.0, "reason": "startup"},
 		"behavior": {"motion": "idle_breathe", "light": "dim_warm", "sound": null, "speech_text": null},
 		"memory": {"last_detected_objects": []},
 	})
@@ -184,12 +197,39 @@ func apply_command(command: Dictionary) -> void:
 	gesture_status = str(gesture.get("status", gesture_status))
 	gesture_confidence = float(gesture.get("confidence", gesture_confidence))
 
+	var speaker: Dictionary = _dictionary_value(command, "speaker")
+	_parse_speaker_command(speaker)
+
 	var memory: Dictionary = _dictionary_value(command, "memory")
 	var recall_target: Dictionary = _dictionary_value(memory, "recall_target")
 	recall_target_found = bool(recall_target.get("found", false))
 	recall_point_x_norm = _optional_norm_float(recall_target, "point_x_norm", -1.0)
 	recall_point_y_norm = _optional_norm_float(recall_target, "point_y_norm", -1.0)
 	recall_location_label = str(recall_target.get("location_label", ""))
+
+
+func _parse_speaker_command(speaker: Dictionary) -> void:
+	speaker_speech_detected = bool(speaker.get("speech_detected", false))
+	var track_value: Variant = speaker.get("active_track_id", "")
+	speaker_active_track_id = "" if track_value == null else str(track_value)
+	var location_value: Variant = speaker.get("active_track_location", "")
+	speaker_active_track_location = "" if location_value == null else str(location_value)
+	var to_robot_value: Variant = speaker.get("speaking_to_robot", null)
+	if to_robot_value == null:
+		speaker_speaking_to_robot = "unknown"
+	elif bool(to_robot_value):
+		speaker_speaking_to_robot = "yes"
+	else:
+		speaker_speaking_to_robot = "no"
+	speaker_confidence = float(speaker.get("confidence", 0.0))
+	speaker_reason = str(speaker.get("reason", ""))
+	var doa_value: Variant = speaker.get("doa_azimuth_deg", null)
+	if doa_value == null:
+		speaker_doa_has_hint = false
+	else:
+		speaker_doa_has_hint = true
+		speaker_doa_azimuth_deg = clampf(float(doa_value), -speaker_doa_max_degrees, speaker_doa_max_degrees)
+		_speaker_doa_valid_until = _time + speaker_doa_hold_seconds
 
 
 func _process(delta: float) -> void:
@@ -234,7 +274,10 @@ func _update_face_follow(delta: float) -> void:
 
 	var desired_x_deg: float = 0.0
 	var desired_y_deg: float = 0.0
-	if not MotionSkillLibrary.blocks_face_follow(current_motion):
+	if _is_sound_seek_motion(current_motion):
+		desired_x_deg = _sound_seek_target_degrees()
+		desired_y_deg = 0.0
+	elif not MotionSkillLibrary.blocks_face_follow(current_motion):
 		if source_x >= 0.0 and source_x <= 1.0:
 			desired_x_deg = clampf((0.5 - source_x) * face_follow_max_degrees * 2.0, -face_follow_max_degrees, face_follow_max_degrees)
 		if source_y >= 0.0 and source_y <= 1.0:
@@ -246,6 +289,22 @@ func _update_face_follow(delta: float) -> void:
 	var slew_step_deg: float = maxf(0.0, face_follow_max_slew_degrees_per_second) * delta
 	_smoothed_face_follow_x_deg = move_toward(_smoothed_face_follow_x_deg, filtered_x_deg, slew_step_deg)
 	_smoothed_face_follow_y_deg = move_toward(_smoothed_face_follow_y_deg, filtered_y_deg, slew_step_deg)
+
+
+func _is_sound_seek_motion(motion: String) -> bool:
+	var skill: String = MotionSkillLibrary.normalize_motion(motion)
+	return skill == "sound_seek_left" or skill == "sound_seek_right" or skill == "sound_seek_center"
+
+
+func _sound_seek_target_degrees() -> float:
+	if speaker_doa_has_hint and _time <= _speaker_doa_valid_until:
+		return clampf(speaker_doa_azimuth_deg, -speaker_doa_max_degrees, speaker_doa_max_degrees)
+	var skill: String = MotionSkillLibrary.normalize_motion(current_motion)
+	if skill == "sound_seek_left":
+		return -absf(speaker_seek_default_degrees)
+	if skill == "sound_seek_right":
+		return absf(speaker_seek_default_degrees)
+	return 0.0
 
 
 func _update_motion_targets() -> void:
@@ -308,7 +367,7 @@ func _can_use_distance_follow() -> bool:
 		return false
 	if engagement_status == "absent":
 		return false
-	if current_motion in ["gesture_approach", "gesture_retreat", "recall_point", "recall_not_found", "sleep_rest", "sleepy_search_then_rest"]:
+	if current_motion in ["gesture_approach", "gesture_retreat", "recall_point", "recall_not_found", "sleep_rest", "sleepy_search_then_rest", "sound_seek_left", "sound_seek_right", "sound_seek_center"]:
 		return false
 	return true
 

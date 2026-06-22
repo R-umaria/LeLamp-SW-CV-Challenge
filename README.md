@@ -297,3 +297,21 @@ See `docs/milestone4_8_recall_hold_distance_follow.md` for implementation detail
 ## Milestone 4.10 planted base distance control
 
 The Godot frontend now keeps Lumos' base planted during face-distance correction. The old forward/back root translation has been replaced with a joint-level reach layer: shoulder and elbow fold/unfold while wrist pitch and head tilt compensate to keep the lamp focused on the detected face. This keeps the simulation closer to a real 6-DOF lamp/robot arm with no wheels.
+
+## Milestone 4.11: Active Speaker Awareness + Directional Listening
+
+This patch adds optional audio-driven speaker awareness without changing the default demo path. Audio, speaker awareness, and stereo DOA are disabled unless explicitly requested.
+
+Single-microphone run:
+
+```powershell
+python -m backend.main --show-window --godot-udp --enable-objects --enable-web-chat --enable-audio --enable-speaker-awareness --preview-flip-horizontal
+```
+
+Stereo direction run:
+
+```powershell
+python -m backend.main --show-window --godot-udp --enable-objects --enable-web-chat --enable-audio --enable-speaker-awareness --enable-doa --mic-distance-m 0.08 --preview-flip-horizontal
+```
+
+Speaker events are logged to `logs/runs/<run_id>/speaker_events.jsonl` and mirrored to `logs/latest/speaker_events.jsonl` unless `--no-latest` is used. See `docs/milestone4_11_active_speaker_awareness.md` for details.

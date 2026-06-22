@@ -17,6 +17,7 @@ try:
 except ImportError as exc:  # pragma: no cover - dependency guard
     raise ImportError("OpenCV is required. Install with: pip install opencv-python") from exc
 
+from backend.perception.active_speaker_detector import ActiveSpeakerResult
 from backend.perception.engagement_detector import EngagementResult, draw_engagement_overlay
 from backend.perception.gesture_detector import HandGestureResult, draw_hand_gesture_overlay
 from backend.perception.object_detector import ObjectDetection, draw_object_overlay
@@ -63,6 +64,7 @@ class PreviewWindow:
         object_detections: Iterable[ObjectDetection] | None = None,
         object_overlay_enabled: bool = False,
         gesture_result: HandGestureResult | None = None,
+        speaker_result: ActiveSpeakerResult | None = None,
     ) -> int:
         """Render a scaled preview and return the OpenCV key code.
 
@@ -96,6 +98,7 @@ class PreviewWindow:
         if object_overlay_enabled:
             draw_object_overlay(display_frame, display_detections)
         draw_hand_gesture_overlay(display_frame, display_gesture)
+        draw_speaker_overlay(display_frame, speaker_result)
 
         preview_frame = self._resize_for_preview(display_frame)
         preview_h, preview_w = preview_frame.shape[:2]
@@ -206,3 +209,33 @@ def _mirror_gesture_result(result: HandGestureResult | None, frame_width: int) -
         hand_bbox=_mirror_bbox(result.hand_bbox, frame_width),
         hand_center_norm=_mirror_center(result.hand_center_norm),
     )
+
+
+def draw_speaker_overlay(frame, speaker_result: ActiveSpeakerResult | None) -> None:
+    if speaker_result is None:
+        return
+    to_robot_value = speaker_result.speaking_to_robot
+    if to_robot_value is True:
+        to_robot = "yes"
+    elif to_robot_value is False:
+        to_robot = "no"
+    else:
+        to_robot = "unknown"
+    doa = "unavailable" if speaker_result.doa_azimuth_deg is None else f"{speaker_result.doa_azimuth_deg:+.0f} deg"
+    lines = [
+        f"speech={'active' if speaker_result.speech_detected else 'inactive'} speaker={speaker_result.active_track_id or 'none'} conf={speaker_result.confidence:.2f}",
+        f"to_lumos={to_robot} doa={doa}",
+        f"speaker_reason={speaker_result.reason}",
+    ]
+    height, _width = frame.shape[:2]
+    base_y = max(24, height - 74)
+    for idx, line in enumerate(lines):
+        cv2.putText(
+            frame,
+            line,
+            (12, base_y + idx * 22),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.52,
+            (255, 255, 255),
+            1,
+        )

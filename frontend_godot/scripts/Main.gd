@@ -91,7 +91,7 @@ func _build_debug_panel(canvas: CanvasLayer) -> void:
 	var panel: PanelContainer = PanelContainer.new()
 	panel.name = "DebugPanel"
 	panel.position = Vector2(12.0, 12.0)
-	panel.custom_minimum_size = Vector2(355.0, 224.0)
+	panel.custom_minimum_size = Vector2(390.0, 294.0)
 	canvas.add_child(panel)
 
 	var margin: MarginContainer = MarginContainer.new()
@@ -213,6 +213,7 @@ func _refresh_debug_ui() -> void:
 	var engagement: Dictionary = _dictionary_value(_last_command, "engagement")
 	var behavior: Dictionary = _dictionary_value(_last_command, "behavior")
 	var gesture: Dictionary = _dictionary_value(_last_command, "gesture")
+	var speaker: Dictionary = _dictionary_value(_last_command, "speaker")
 	var memory: Dictionary = _dictionary_value(_last_command, "memory")
 	var recall_target: Dictionary = _dictionary_value(memory, "recall_target")
 	var speech_value: Variant = behavior.get("speech_text", "")
@@ -223,9 +224,11 @@ func _refresh_debug_ui() -> void:
 	var face_x_text: String = _optional_debug_value(engagement.get("face_x_norm", null))
 	var face_y_text: String = _optional_debug_value(engagement.get("face_y_norm", null))
 	var face_area_text: String = _optional_debug_value(engagement.get("face_area_ratio", null))
+	var speaker_to_lumos: String = _speaker_to_lumos_text(speaker.get("speaking_to_robot", null))
+	var doa_text: String = _doa_debug_text(speaker.get("doa_azimuth_deg", null))
 
 	var lines: Array[String] = []
-	lines.append("Lumos Milestone 4.10 Planted Base Arm Reach")
+	lines.append("Lumos Milestone 4.11 Active Speaker Awareness")
 	lines.append("UDP: %s" % _receiver_status)
 	lines.append("Lumos browser chat: http://127.0.0.1:8765")
 	lines.append("Health: %s  age: %.1fs" % [connection_health, packet_age_s])
@@ -235,6 +238,9 @@ func _refresh_debug_ui() -> void:
 	lines.append("Reason: %s" % str(engagement.get("reason", "none")))
 	lines.append("Face hint: x=%s  y=%s  area=%s" % [face_x_text, face_y_text, face_area_text])
 	lines.append("Gesture: %s  %.2f" % [str(gesture.get("status", "none")), float(gesture.get("confidence", 0.0))])
+	lines.append("Speech: %s  Speaker: %s  %.2f" % ["active" if bool(speaker.get("speech_detected", false)) else "inactive", _speaker_track_text(speaker), float(speaker.get("confidence", 0.0))])
+	lines.append("To Lumos: %s  DOA: %s" % [speaker_to_lumos, doa_text])
+	lines.append("Speaker reason: %s" % str(speaker.get("reason", "none")))
 	if recall_target.size() > 0:
 		lines.append("Recall target: found=%s loc=%s point=(%s,%s)" % [
 			str(recall_target.get("found", false)),
@@ -253,6 +259,32 @@ func _refresh_debug_ui() -> void:
 			debug_text += "\n"
 		debug_text += line
 	_debug_label.text = debug_text
+
+
+func _speaker_track_text(speaker: Dictionary) -> String:
+	var track_value: Variant = speaker.get("active_track_id", null)
+	if track_value == null:
+		return "none"
+	var track_text: String = str(track_value)
+	if track_text == "":
+		return "none"
+	var location_value: Variant = speaker.get("active_track_location", null)
+	if location_value == null or str(location_value) == "":
+		return track_text
+	return "%s/%s" % [track_text, str(location_value)]
+
+
+func _speaker_to_lumos_text(value: Variant) -> String:
+	if value == null:
+		return "unknown"
+	return "yes" if bool(value) else "no"
+
+
+func _doa_debug_text(value: Variant) -> String:
+	if value == null:
+		return "unavailable"
+	var degrees: float = float(value)
+	return "%+.0f deg" % degrees
 
 
 func _optional_debug_value(value: Variant) -> String:
@@ -275,6 +307,15 @@ func _default_command() -> Dictionary:
 			"status": "none",
 			"confidence": 0.0,
 			"reason": "default_command",
+		},
+		"speaker": {
+			"speech_detected": false,
+			"active_track_id": null,
+			"active_track_location": null,
+			"speaking_to_robot": null,
+			"confidence": 0.0,
+			"reason": "default_command",
+			"doa_azimuth_deg": null,
 		},
 		"behavior": {
 			"motion": "idle_breathe",
@@ -302,6 +343,15 @@ func _sleep_command(age_s: float) -> Dictionary:
 			"status": "none",
 			"confidence": 0.0,
 			"reason": "backend_stale",
+		},
+		"speaker": {
+			"speech_detected": false,
+			"active_track_id": null,
+			"active_track_location": null,
+			"speaking_to_robot": null,
+			"confidence": 0.0,
+			"reason": "backend_stale",
+			"doa_azimuth_deg": null,
 		},
 		"behavior": {
 			"motion": "sleepy_search_then_rest",

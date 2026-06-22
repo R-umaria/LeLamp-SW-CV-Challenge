@@ -39,6 +39,16 @@ static func normalize_motion(motion: String) -> String:
 			return "dance_loop"
 		"upset", "upset_turn", "sad_turn_away":
 			return "upset_turn"
+		"active_listen", "listening_active":
+			return "active_listen"
+		"listening_attentive", "quiet_listen", "aware_listen":
+			return "listening_attentive"
+		"sound_seek_left", "listen_left":
+			return "sound_seek_left"
+		"sound_seek_right", "listen_right":
+			return "sound_seek_right"
+		"sound_seek_center", "listen_center", "sound_seek":
+			return "sound_seek_center"
 		_:
 			return motion
 
@@ -80,6 +90,12 @@ static func target_for(motion: String, t: float, elapsed_s: float) -> PackedFloa
 			return _dance_loop(t)
 		"upset_turn":
 			return _upset_turn(t)
+		"active_listen":
+			return _active_listen(t)
+		"listening_attentive":
+			return _listening_attentive(t)
+		"sound_seek_left", "sound_seek_right", "sound_seek_center":
+			return _sound_seek(t)
 		_:
 			return _idle_breathe(t)
 
@@ -113,6 +129,10 @@ static func smooth_speed_for(motion: String) -> float:
 			return 2.35
 		"upset_turn":
 			return 1.35
+		"active_listen", "listening_attentive":
+			return 1.70
+		"sound_seek_left", "sound_seek_right", "sound_seek_center":
+			return 1.48
 		_:
 			return 1.55
 

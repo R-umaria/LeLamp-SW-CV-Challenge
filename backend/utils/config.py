@@ -166,6 +166,50 @@ class MemoryConfig:
 
 
 @dataclass(frozen=True)
+class AudioConfig:
+    # Optional microphone path for Milestone 4.11. Disabled by default so the
+    # existing camera/FSM/Godot demo remains unchanged unless explicitly enabled.
+    enabled: bool = False
+    device: str | None = None
+    sample_rate: int = 16000
+    block_ms: int = 30
+    request_stereo: bool = False
+
+    # Rolling RMS VAD thresholds. ``vad_energy_threshold`` is a multiplier over
+    # the learned noise floor, with ``vad_absolute_threshold`` as a safety floor.
+    vad_energy_threshold: float = 2.4
+    vad_absolute_threshold: float = 0.010
+    vad_min_noise_floor: float = 0.003
+    vad_noise_update_alpha: float = 0.08
+    vad_noise_update_alpha_speech: float = 0.004
+    vad_smoothing_blocks: int = 4
+    vad_active_vote_ratio: float = 0.50
+
+
+@dataclass(frozen=True)
+class DirectionOfArrivalConfig:
+    enabled: bool = False
+    mic_distance_m: float = 0.08
+    min_rms: float = 1e-4
+    min_confidence: float = 0.12
+    max_abs_azimuth_deg: float = 90.0
+
+
+@dataclass(frozen=True)
+class SpeakerAwarenessConfig:
+    enabled: bool = False
+    debug: bool = False
+    fusion_interval_s: float = 0.12
+    policy_min_confidence: float = 0.55
+    mouth_motion_threshold: float = 0.18
+    ambiguous_margin: float = 0.12
+    face_track_ttl_s: float = 1.0
+    max_face_match_distance_norm: float = 0.22
+    min_face_iou: float = 0.15
+
+
+
+@dataclass(frozen=True)
 class AppConfig:
     camera: CameraConfig = CameraConfig()
     engagement: EngagementConfig = EngagementConfig()
@@ -176,6 +220,9 @@ class AppConfig:
     objects: ObjectDetectionConfig = ObjectDetectionConfig()
     gestures: HandGestureConfig = HandGestureConfig()
     memory: MemoryConfig = MemoryConfig()
+    audio: AudioConfig = AudioConfig()
+    doa: DirectionOfArrivalConfig = DirectionOfArrivalConfig()
+    speaker_awareness: SpeakerAwarenessConfig = SpeakerAwarenessConfig()
 
 
 DEFAULT_CONFIG = AppConfig()
