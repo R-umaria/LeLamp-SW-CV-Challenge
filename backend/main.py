@@ -32,6 +32,7 @@ from backend.behavior.speaker_policy import SpeakerPolicyDecision, apply_speaker
 from backend.audio.audio_capture import AudioCaptureWorker
 from backend.audio.gcc_phat import DirectionOfArrivalResult, estimate_direction_of_arrival
 from backend.audio.voice_activity_detector import VoiceActivityDetector, VoiceActivityResult
+from backend.audio.speech_to_text import SpeechToTextWorker, SpeechTranscript, UtteranceSegmenter
 from backend.behavior.state_machine import InteractionStateMachine, LampState
 from backend.conversation.chat_udp_receiver import ChatUdpReceiver
 from backend.conversation.recall_agent import RecallAgent
@@ -56,6 +57,7 @@ from backend.utils.config import (
     MemoryConfig,
     ObjectDetectionConfig,
     SpeakerAwarenessConfig,
+    SpeechToTextConfig,
     RuntimeConfig,
     SmoothingConfig,
     StateMachineConfig,
@@ -122,6 +124,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--speaker-seek-min-confidence", type=float, default=0.30, help="Minimum confidence for sound-seeking when speech is heard but no visible speaker is identified.")
     parser.add_argument("--speaker-secondary-min-area", type=float, default=0.018, help="Minimum frame-area ratio for secondary speaker face candidates. Raises this to suppress false person_2 tracks.")
     parser.add_argument("--speaker-debug", action="store_true", help="Log detailed face-track and speaker-fusion diagnostics.")
+
+    parser.add_argument("--enable-stt", action="store_true", help="Enable gated local speech-to-text. Accepted transcripts are routed to the existing grounded recall pipeline.")
+    parser.add_argument("--stt-backend", type=str, default="faster_whisper", choices=["faster_whisper", "whisper"], help="Local STT backend. faster_whisper is recommended for CPU demo use.")
+    parser.add_argument("--stt-model-size", type=str, default="tiny.en", help="Whisper model size/name for STT, e.g. tiny.en, base.en, small.en.")
+    parser.add_argument("--stt-device", type=str, default="cpu", help="STT device, usually cpu or cuda.")
+    parser.add_argument("--stt-compute-type", type=str, default="int8", help="faster-whisper compute type, e.g. int8, int8_float16, float16.")
+    parser.add_argument("--stt-language", type=str, default="en", help="STT language hint. Use empty string for auto-detect.")
+    parser.add_argument("--stt-min-utterance-s", type=float, default=0.55, help="Minimum captured voice utterance length before STT can finalize.")
+    parser.add_argument("--stt-max-utterance-s", type=float, default=6.0, help="Maximum captured voice utterance length.")
+    parser.add_argument("--stt-end-silence-s", type=float, default=0.85, help="Silence duration that finalizes a captured utterance.")
+    parser.add_argument("--stt-cooldown-s", type=float, default=1.25, help="Cooldown after one transcript before a new utterance can start.")
+    parser.add_argument("--stt-speaker-min-confidence", type=float, default=0.45, help="Minimum active-speaker confidence required before recording an utterance for STT.")
+    parser.add_argument("--stt-min-words", type=int, default=2, help="Reject transcripts with fewer words than this.")
 
     parser.add_argument("--interactive-recall", action="store_true", help="Debug only: allow terminal recall questions while the backend is running.")
     parser.add_argument("--enable-godot-chat", action="store_true", help="Legacy/non-primary: listen for live chat queries from Godot over local UDP.")
@@ -254,6 +269,7 @@ def build_configs(
     AudioConfig,
     DirectionOfArrivalConfig,
     SpeakerAwarenessConfig,
+    SpeechToTextConfig,
 ]:
     camera_config = CameraConfig(index=args.camera_index, width=args.width, height=args.height)
     engagement_config = EngagementConfig(
@@ -324,6 +340,20 @@ def build_configs(
         policy_seek_min_confidence=max(0.0, min(1.0, float(args.speaker_seek_min_confidence))),
         secondary_face_min_area_ratio=max(0.0, float(args.speaker_secondary_min_area)),
     )
+    stt_config = SpeechToTextConfig(
+        enabled=bool(args.enable_stt),
+        backend=str(args.stt_backend),
+        model_size=str(args.stt_model_size),
+        device=str(args.stt_device),
+        compute_type=str(args.stt_compute_type),
+        language=str(args.stt_language or ""),
+        speaker_min_confidence=max(0.0, min(1.0, float(args.stt_speaker_min_confidence))),
+        min_utterance_s=max(0.15, float(args.stt_min_utterance_s)),
+        max_utterance_s=max(0.5, float(args.stt_max_utterance_s)),
+        end_silence_s=max(0.15, float(args.stt_end_silence_s)),
+        cooldown_s=max(0.0, float(args.stt_cooldown_s)),
+        min_words=max(1, int(args.stt_min_words)),
+    )
     return (
         camera_config,
         engagement_config,
@@ -337,6 +367,7 @@ def build_configs(
         audio_config,
         doa_config,
         speaker_config,
+        stt_config,
     )
 
 
@@ -359,6 +390,7 @@ def main() -> int:
         audio_config,
         doa_config,
         speaker_config,
+        stt_config,
     ) = build_configs(args)
 
     run_paths = create_run_paths(
@@ -378,8 +410,10 @@ def main() -> int:
     command_paths = [run_paths.commands_path] + ([latest_commands_path] if latest_commands_path else [])
     commands_path = run_paths.commands_path
     speaker_event_paths = [run_paths.run_dir / "speaker_events.jsonl"]
+    stt_event_paths = [run_paths.run_dir / "stt_events.jsonl"]
     if not args.no_latest:
         speaker_event_paths.append(run_paths.latest_dir / "speaker_events.jsonl")
+        stt_event_paths.append(run_paths.latest_dir / "stt_events.jsonl")
     godot_sender = GodotUdpSender(godot_udp_config, logger=logger)
 
     camera = OpenCVCamera(camera_config.index, camera_config.width, camera_config.height)
@@ -397,6 +431,9 @@ def main() -> int:
         logger=logger,
         event_paths=speaker_event_paths,
     )
+    stt_result_queue: queue.Queue[SpeechTranscript] = queue.Queue()
+    utterance_segmenter = UtteranceSegmenter(stt_config, logger=logger)
+    stt_worker = SpeechToTextWorker(stt_config, stt_result_queue, logger=logger)
     preview_window = PreviewWindow(
         PreviewWindowConfig(
             title="Lumos - CV Preview",
@@ -418,7 +455,7 @@ def main() -> int:
     recall_worker: RecallWorker | None = None
     pending_recalls: dict[str, dict] = {}
     recall_stop_event = threading.Event()
-    if args.interactive_recall or args.enable_godot_chat or args.enable_web_chat:
+    if args.interactive_recall or args.enable_godot_chat or args.enable_web_chat or args.enable_stt:
         recall_log_paths = [run_paths.run_dir / "recall.jsonl"]
         if not args.no_latest:
             recall_log_paths.append(run_paths.latest_dir / "recall.jsonl")
@@ -479,7 +516,7 @@ def main() -> int:
             )
             return 1
 
-    logger.info("Starting Milestone 4.3.3 backend with expressive Godot polish, optional face-follow hints, non-blocking browser chat, and homelab Ollama support")
+    logger.info("Starting Lumos backend with engagement, object memory, active speaker awareness, and optional voice STT recall")
     logger.info("Run id=%s", run_paths.run_id)
     logger.info("Run directory=%s", run_paths.run_dir)
     if not args.no_latest:
@@ -561,10 +598,28 @@ def main() -> int:
         speaker_config.policy_seek_min_confidence,
         speaker_config.secondary_face_min_area_ratio,
     )
+    logger.info(
+        "STT config enabled=%s backend=%s model=%s device=%s compute_type=%s gated_by_speaker=True min_utterance=%.2fs max_utterance=%.2fs end_silence=%.2fs speaker_min_conf=%.2f",
+        stt_config.enabled,
+        stt_config.backend,
+        stt_config.model_size,
+        stt_config.device,
+        stt_config.compute_type,
+        stt_config.min_utterance_s,
+        stt_config.max_utterance_s,
+        stt_config.end_silence_s,
+        stt_config.speaker_min_confidence,
+    )
     if speaker_config.enabled and not audio_config.enabled:
         reason_payload = {"event": "speaker_awareness_disabled_reason", "reason": "enable_speaker_awareness_without_enable_audio"}
         append_jsonl(speaker_event_paths, reason_payload)
         logger.warning("speaker_awareness_disabled_reason reason=%s", reason_payload["reason"])
+    if stt_config.enabled and not audio_config.enabled:
+        append_jsonl(stt_event_paths, {"event": "stt_disabled_reason", "reason": "enable_stt_without_enable_audio"})
+        logger.warning("stt_disabled_reason reason=enable_stt_without_enable_audio")
+    if stt_config.enabled and not speaker_config.enabled:
+        append_jsonl(stt_event_paths, {"event": "stt_disabled_reason", "reason": "enable_stt_without_enable_speaker_awareness"})
+        logger.warning("stt_disabled_reason reason=enable_stt_without_enable_speaker_awareness")
     if godot_udp_config.enabled:
         logger.info("Commands will also be streamed to Godot via udp://%s:%s", godot_udp_config.host, godot_udp_config.port)
 
@@ -592,6 +647,9 @@ def main() -> int:
     last_detected_objects: list[dict] = []
     active_recall_feedback: dict | None = None
     display_detections = []
+    stt_transcribe_ms = ""
+    stt_last_text = ""
+    stt_last_status = ""
 
     try:
         audio_started = False
@@ -599,6 +657,8 @@ def main() -> int:
             audio_started = audio_capture.start()
         if speaker_config.enabled and audio_config.enabled and audio_started:
             speaker_worker.start()
+        if stt_config.enabled and audio_config.enabled and speaker_config.enabled and audio_started:
+            stt_worker.start()
         elif speaker_config.enabled and audio_config.enabled and not audio_started:
             append_jsonl(
                 speaker_event_paths,
@@ -634,69 +694,71 @@ def main() -> int:
             memory_duplicate_skip_count = 0
             now = time.monotonic()
 
+            new_voice_pairs = []
             if audio_capture.available:
-                latest_audio = audio_capture.get_latest()
-                if latest_audio is not None:
-                    audio_capture_ms = round(float(latest_audio.capture_ms), 3)
-                    if latest_audio.sequence != last_audio_sequence:
-                        last_audio_sequence = latest_audio.sequence
-                        t_audio = time.perf_counter()
-                        last_voice_result = voice_detector.update(latest_audio)
-                        vad_ms = round((time.perf_counter() - t_audio) * 1000.0, 3)
-                        voice_signature = bool(last_voice_result.is_speech)
-                        should_log_voice = (
-                            voice_signature != last_voice_signature
-                            or last_voice_result.is_speech
-                            or (now - last_voice_log_at) >= 0.75
+                new_audio_chunks = audio_capture.get_chunks_since(last_audio_sequence)
+                if new_audio_chunks:
+                    audio_capture_ms = round(float(new_audio_chunks[-1].capture_ms), 3)
+                for latest_audio in new_audio_chunks:
+                    last_audio_sequence = latest_audio.sequence
+                    t_audio = time.perf_counter()
+                    last_voice_result = voice_detector.update(latest_audio)
+                    vad_ms = round((time.perf_counter() - t_audio) * 1000.0, 3)
+                    new_voice_pairs.append((latest_audio, last_voice_result))
+                    voice_signature = bool(last_voice_result.is_speech)
+                    should_log_voice = (
+                        voice_signature != last_voice_signature
+                        or last_voice_result.is_speech
+                        or (now - last_voice_log_at) >= 0.75
+                    )
+                    if should_log_voice:
+                        append_jsonl(
+                            speaker_event_paths,
+                            {"event": "voice_activity", **last_voice_result.to_log_dict()},
                         )
-                        if should_log_voice:
+                        logger.info(
+                            "voice_activity active=%s confidence=%.3f rms=%.6f noise_floor=%.6f channels=%s latency_ms=%s",
+                            last_voice_result.is_speech,
+                            last_voice_result.confidence,
+                            last_voice_result.rms,
+                            last_voice_result.noise_floor,
+                            last_voice_result.channels,
+                            vad_ms,
+                        )
+                        last_voice_log_at = now
+                        last_voice_signature = voice_signature
+                    if doa_config.enabled:
+                        t_doa = time.perf_counter()
+                        last_doa_result = estimate_direction_of_arrival(
+                            latest_audio.samples,
+                            latest_audio.sample_rate,
+                            doa_config.mic_distance_m,
+                            timestamp=latest_audio.timestamp,
+                            min_rms=doa_config.min_rms,
+                            min_confidence=doa_config.min_confidence,
+                        )
+                        doa_ms = round((time.perf_counter() - t_doa) * 1000.0, 3)
+                        doa_signature = (last_doa_result.available, last_doa_result.reason)
+                        should_log_doa = (
+                            doa_signature != last_doa_signature
+                            or last_doa_result.available
+                            or (now - last_doa_log_at) >= 0.75
+                        )
+                        if should_log_doa:
                             append_jsonl(
                                 speaker_event_paths,
-                                {"event": "voice_activity", **last_voice_result.to_log_dict()},
+                                {"event": "doa_result", **last_doa_result.to_log_dict()},
                             )
                             logger.info(
-                                "voice_activity active=%s confidence=%.3f rms=%.6f noise_floor=%.6f channels=%s latency_ms=%s",
-                                last_voice_result.is_speech,
-                                last_voice_result.confidence,
-                                last_voice_result.rms,
-                                last_voice_result.noise_floor,
-                                last_voice_result.channels,
-                                vad_ms,
+                                "doa_result available=%s azimuth=%s confidence=%.3f reason=%s latency_ms=%s",
+                                last_doa_result.available,
+                                last_doa_result.azimuth_deg,
+                                last_doa_result.confidence,
+                                last_doa_result.reason,
+                                doa_ms,
                             )
-                            last_voice_log_at = now
-                            last_voice_signature = voice_signature
-                        if doa_config.enabled:
-                            t_doa = time.perf_counter()
-                            last_doa_result = estimate_direction_of_arrival(
-                                latest_audio.samples,
-                                latest_audio.sample_rate,
-                                doa_config.mic_distance_m,
-                                timestamp=latest_audio.timestamp,
-                                min_rms=doa_config.min_rms,
-                                min_confidence=doa_config.min_confidence,
-                            )
-                            doa_ms = round((time.perf_counter() - t_doa) * 1000.0, 3)
-                            doa_signature = (last_doa_result.available, last_doa_result.reason)
-                            should_log_doa = (
-                                doa_signature != last_doa_signature
-                                or last_doa_result.available
-                                or (now - last_doa_log_at) >= 0.75
-                            )
-                            if should_log_doa:
-                                append_jsonl(
-                                    speaker_event_paths,
-                                    {"event": "doa_result", **last_doa_result.to_log_dict()},
-                                )
-                                logger.info(
-                                    "doa_result available=%s azimuth=%s confidence=%.3f reason=%s latency_ms=%s",
-                                    last_doa_result.available,
-                                    last_doa_result.azimuth_deg,
-                                    last_doa_result.confidence,
-                                    last_doa_result.reason,
-                                    doa_ms,
-                                )
-                                last_doa_log_at = now
-                                last_doa_signature = doa_signature
+                            last_doa_log_at = now
+                            last_doa_signature = doa_signature
 
             should_detect_objects = object_detector.enabled and (
                 last_object_detection_at == 0.0 or (now - last_object_detection_at >= object_config.interval_s)
@@ -768,6 +830,20 @@ def main() -> int:
                     if speaker_snapshot.frame_sequence != last_speaker_snapshot_sequence:
                         active_speaker_fusion_ms = speaker_snapshot.fusion_ms
                         last_speaker_snapshot_sequence = speaker_snapshot.frame_sequence
+
+            if stt_config.enabled and audio_config.enabled and speaker_config.enabled and stt_worker.enabled:
+                allow_stt_capture = not pending_recalls and active_recall_feedback is None
+                for audio_chunk, voice_result_for_chunk in new_voice_pairs:
+                    utterance = utterance_segmenter.update(
+                        audio_chunk,
+                        voice_result_for_chunk,
+                        last_speaker_result,
+                        now=now,
+                        allow_capture=allow_stt_capture,
+                    )
+                    if utterance is not None:
+                        append_jsonl(stt_event_paths, {"event": "stt_utterance", **utterance.to_log_dict()})
+                        stt_worker.submit(utterance)
 
             t0 = time.perf_counter()
             smoothed_engagement = smoother.update(raw_engagement)
@@ -841,6 +917,37 @@ def main() -> int:
                     smoothed_engagement.confidence,
                 )
 
+            if stt_config.enabled:
+                while True:
+                    try:
+                        transcript = stt_result_queue.get_nowait()
+                    except queue.Empty:
+                        break
+                    stt_transcribe_ms = round(transcript.transcribe_ms, 3)
+                    stt_last_text = transcript.text
+                    stt_last_status = transcript.reason
+                    append_jsonl(stt_event_paths, {"event": "stt_transcript", **transcript.to_log_dict()})
+                    if transcript.accepted and recall_queue is not None:
+                        recall_queue.put(
+                            RecallWorkItem(
+                                text=transcript.text,
+                                request_id=transcript.request_id,
+                                source="voice_stt",
+                            )
+                        )
+                        logger.info(
+                            "voice_recall_transcript_queued request_id=%s text=%r speaker=%s",
+                            transcript.request_id,
+                            transcript.text,
+                            transcript.speaker_track_id,
+                        )
+                    elif transcript.accepted:
+                        logger.warning(
+                            "voice_recall_transcript_dropped request_id=%s reason=recall_queue_unavailable text=%r",
+                            transcript.request_id,
+                            transcript.text,
+                        )
+
             if recall_worker is not None and recall_queue is not None and recall_result_queue is not None:
                 while True:
                     try:
@@ -849,10 +956,16 @@ def main() -> int:
                         break
 
                     web_request = recall_item if isinstance(recall_item, WebChatRequest) else None
-                    recall_query = web_request.text if web_request is not None else str(recall_item)
-                    source = "browser" if web_request is not None else "terminal_or_udp"
-                    request_id = web_request.request_id if web_request is not None else RecallWorkItem(text=recall_query, source=source).request_id
-                    work_item = RecallWorkItem(text=recall_query, request_id=request_id, source=source)
+                    if isinstance(recall_item, RecallWorkItem):
+                        recall_query = recall_item.text
+                        source = recall_item.source
+                        request_id = recall_item.request_id
+                        work_item = recall_item
+                    else:
+                        recall_query = web_request.text if web_request is not None else str(recall_item)
+                        source = "browser" if web_request is not None else "terminal_or_udp"
+                        request_id = web_request.request_id if web_request is not None else RecallWorkItem(text=recall_query, source=source).request_id
+                        work_item = RecallWorkItem(text=recall_query, request_id=request_id, source=source)
                     active_recall_feedback = None
                     pending_recalls[request_id] = {"source": source, "text": recall_query, "queued_at": time.monotonic()}
                     if web_request is not None and web_chat_server is not None:
@@ -1027,6 +1140,9 @@ def main() -> int:
                     "llm_fallback_reason": llm_fallback_reason,
                     "recall_worker_ms": recall_worker_ms,
                     "pending_recall_count": len(pending_recalls),
+                    "stt_transcribe_ms": stt_transcribe_ms,
+                    "stt_last_text": stt_last_text,
+                    "stt_last_status": stt_last_status,
                     "smoothing_ms": round(smoothing_ms, 3),
                     "state_machine_ms": round(state_machine_ms, 3),
                     "command_build_ms": round(command_ms, 3),
@@ -1104,6 +1220,7 @@ def main() -> int:
         if web_chat_server is not None:
             web_chat_server.stop()
         gesture_detector.close()
+        stt_worker.stop()
         speaker_worker.stop()
         audio_capture.stop()
         godot_sender.close()

@@ -331,3 +331,40 @@ Useful tuning flags:
 ```
 
 Speech awareness still detects speech activity and likely speaker; it does not transcribe words. Add a local STT module as the next milestone if Lumos should understand spoken commands directly.
+
+## Milestone 4.12: Voice STT Recall
+
+Lumos can now use local speech-to-text for recall questions. STT is gated by active-speaker awareness, so it records only short utterances from a person likely speaking to Lumos, then routes the transcript into the same grounded recall worker used by browser chat.
+
+Install dependencies:
+
+```powershell
+python -m pip install -r backend/requirements.txt
+```
+
+Recommended voice-recall run command:
+
+```powershell
+python -m backend.main --show-window --godot-udp --enable-objects --enable-audio --enable-speaker-awareness --enable-stt --preview-flip-horizontal --speaker-fusion-interval 0.25 --speaker-frame-width 640 --speaker-policy-hold-s 1.15 --stt-model-size tiny.en
+```
+
+Then ask: `Did you see my phone?`
+
+If Lumos has a stored phone memory, it reuses the existing recall-pointing behavior. If no matching memory exists, it answers that it does not remember seeing it.
+
+STT logs are written to:
+
+```text
+logs/runs/<run_id>/stt_events.jsonl
+logs/latest/stt_events.jsonl
+```
+
+Useful flags:
+
+```text
+--stt-model-size tiny.en        # fastest CPU demo path
+--stt-model-size base.en        # better transcript, slower
+--stt-device cuda               # only if CUDA is configured
+--stt-end-silence-s 0.85        # utterance finalization delay
+--stt-speaker-min-confidence 0.45
+```

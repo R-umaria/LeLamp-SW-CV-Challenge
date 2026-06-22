@@ -215,6 +215,37 @@ class SpeakerAwarenessConfig:
 
 
 @dataclass(frozen=True)
+class SpeechToTextConfig:
+    # Optional local STT path for Milestone 4.12. It is gated by active-speaker
+    # awareness: Lumos records only short utterances from a person likely talking
+    # to the lamp, then routes accepted transcripts into the existing recall path.
+    enabled: bool = False
+    backend: str = "faster_whisper"
+    model_size: str = "tiny.en"
+    device: str = "cpu"
+    compute_type: str = "int8"
+    language: str = "en"
+    beam_size: int = 1
+    no_speech_threshold: float = 0.60
+
+    # Utterance segmentation parameters. Defaults favor short demo questions such
+    # as "did you see my phone" while avoiding long background transcription.
+    speaker_min_confidence: float = 0.45
+    min_utterance_s: float = 0.55
+    max_utterance_s: float = 6.0
+    end_silence_s: float = 0.85
+    pre_roll_s: float = 0.45
+    cooldown_s: float = 1.25
+    max_queue_size: int = 2
+
+    # Transcript filters. The first milestone is recall-focused, so reject tiny
+    # Whisper fragments that are usually background noise or hallucination.
+    min_chars: int = 5
+    min_words: int = 2
+
+
+
+@dataclass(frozen=True)
 class AppConfig:
     camera: CameraConfig = CameraConfig()
     engagement: EngagementConfig = EngagementConfig()
@@ -228,6 +259,7 @@ class AppConfig:
     audio: AudioConfig = AudioConfig()
     doa: DirectionOfArrivalConfig = DirectionOfArrivalConfig()
     speaker_awareness: SpeakerAwarenessConfig = SpeakerAwarenessConfig()
+    speech_to_text: SpeechToTextConfig = SpeechToTextConfig()
 
 
 DEFAULT_CONFIG = AppConfig()

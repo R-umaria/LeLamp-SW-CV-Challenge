@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 from typing import Optional
 
@@ -52,6 +53,7 @@ class AudioCaptureWorker:
         self._stream = None
         self._lock = threading.Lock()
         self._latest: Optional[AudioChunk] = None
+        self._recent: deque[AudioChunk] = deque(maxlen=240)
         self._sequence = 0
         self._last_callback_at = 0.0
 
@@ -173,7 +175,7 @@ class AudioCaptureWorker:
             capture_ms = (time.perf_counter() - callback_started) * 1000.0
             with self._lock:
                 self._sequence += 1
-                self._latest = AudioChunk(
+                chunk = AudioChunk(
                     timestamp=timestamp,
                     samples=samples,
                     sample_rate=int(self.actual_sample_rate),
@@ -182,6 +184,8 @@ class AudioCaptureWorker:
                     capture_ms=capture_ms,
                     status=status_text,
                 )
+                self._latest = chunk
+                self._recent.append(chunk)
                 self._last_callback_at = time.monotonic()
             if status:
                 self.logger.debug("audio_capture_status status=%s", status)
@@ -191,6 +195,20 @@ class AudioCaptureWorker:
     def get_latest(self) -> Optional[AudioChunk]:
         with self._lock:
             return self._latest
+
+    def get_chunks_since(self, last_sequence: int, max_chunks: int = 80) -> list[AudioChunk]:
+        """Return recent chunks newer than ``last_sequence`` in sequence order.
+
+        The main loop may be busy with object detection or rendering. STT needs
+        contiguous audio, so callers should consume the recent ring buffer rather
+        than only the newest block. If the loop falls far behind, the oldest
+        chunks are intentionally dropped to keep the app live.
+        """
+        with self._lock:
+            chunks = [chunk for chunk in self._recent if chunk.sequence > int(last_sequence)]
+        if max_chunks > 0 and len(chunks) > max_chunks:
+            return chunks[-int(max_chunks):]
+        return chunks
 
     def stop(self) -> None:
         stream = self._stream
