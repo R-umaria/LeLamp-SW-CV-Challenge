@@ -203,11 +203,14 @@ class SpeakerAwarenessConfig:
     worker_frame_width: int = 640
     worker_log_interval_s: float = 1.0
     policy_min_confidence: float = 0.55
+    policy_seek_min_confidence: float = 0.30
+    policy_hold_s: float = 1.15
     mouth_motion_threshold: float = 0.18
     ambiguous_margin: float = 0.12
-    face_track_ttl_s: float = 1.0
-    max_face_match_distance_norm: float = 0.22
+    face_track_ttl_s: float = 1.25
+    max_face_match_distance_norm: float = 0.28
     min_face_iou: float = 0.15
+    secondary_face_min_area_ratio: float = 0.018
 
 
 

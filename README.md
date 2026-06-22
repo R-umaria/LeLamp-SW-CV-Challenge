@@ -316,24 +316,18 @@ python -m backend.main --show-window --godot-udp --enable-objects --enable-web-c
 
 Speaker events are logged to `logs/runs/<run_id>/speaker_events.jsonl` and mirrored to `logs/latest/speaker_events.jsonl` unless `--no-latest` is used. See `docs/milestone4_11_active_speaker_awareness.md` for details.
 
-### Milestone 4.11.1 audio/speaker hotfix
+## Milestone 4.11.2: Speaker ID + Listening Smoothing Hotfix
 
-Before using active speaker awareness, install the audio dependency:
+Active speaker awareness now exposes scene-based presentation IDs instead of raw internal track IDs. A single visible person is reported as `person_1`; two credible visible faces are reported as `person_1` and `person_2` left-to-right. This avoids confusing `person_4/person_5` labels after temporary face-track dropouts.
 
-```powershell
-python -m pip install -r backend/requirements.txt
-```
+Speaker-aware motion also holds briefly after a high-confidence listening decision, which reduces blue-light flicker during short syllable gaps.
 
-Check microphone visibility:
+Useful tuning flags:
 
 ```powershell
-python -m backend.main --list-audio-devices
+--speaker-policy-hold-s 1.15
+--speaker-seek-min-confidence 0.30
+--speaker-secondary-min-area 0.018
 ```
 
-Recommended speaker run after the hotfix:
-
-```powershell
-python -m backend.main --show-window --godot-udp --enable-objects --enable-web-chat --enable-audio --enable-speaker-awareness --preview-flip-horizontal --speaker-fusion-interval 0.25 --speaker-frame-width 640
-```
-
-The hotfix moves speaker fusion into a latest-frame-only worker thread. This keeps face/mouth speaker analysis from blocking the camera preview and Godot command loop. If `--enable-doa` is used but stereo input cannot open, Lumos falls back to mono VAD instead of disabling all audio.
+Speech awareness still detects speech activity and likely speaker; it does not transcribe words. Add a local STT module as the next milestone if Lumos should understand spoken commands directly.

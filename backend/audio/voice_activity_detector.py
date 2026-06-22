@@ -45,6 +45,7 @@ class VoiceActivityDetector:
         self.config = config
         self.noise_floor = max(float(config.vad_min_noise_floor), 1e-8)
         self._history: deque[bool] = deque(maxlen=max(1, int(config.vad_smoothing_blocks)))
+        self._confidence_history: deque[float] = deque(maxlen=max(1, int(config.vad_smoothing_blocks)))
         self._last_result = VoiceActivityResult(
             timestamp=0.0,
             is_speech=False,
@@ -88,7 +89,14 @@ class VoiceActivityDetector:
         is_speech = active_votes >= required_votes
 
         ratio = rms / max(self.noise_floor * threshold_multiplier, float(self.config.vad_absolute_threshold), 1e-8)
-        confidence = max(0.0, min(1.0, (ratio - 0.75) / 1.75))
+        instantaneous_confidence = max(0.0, min(1.0, (ratio - 0.75) / 1.75))
+        self._confidence_history.append(float(instantaneous_confidence))
+        confidence = instantaneous_confidence
+        if is_speech and self._confidence_history:
+            # Speech decisions are smoothed over several 30 ms blocks, so carry
+            # some recent confidence forward. This avoids confusing states such
+            # as is_speech=True with audio_confidence=0.0 during syllable gaps.
+            confidence = max(confidence, 0.70 * max(self._confidence_history))
         if not is_speech:
             confidence = min(confidence, 0.42)
 

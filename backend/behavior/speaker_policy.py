@@ -32,6 +32,33 @@ def apply_speaker_policy(
         return SpeakerPolicyDecision(behavior, False, "no_speech_active")
     if state == LampState.RECALLING:
         return SpeakerPolicyDecision(behavior, False, "recall_has_priority")
+    # No visible speaker, or visible face without mouth evidence: sound-seeking
+    # is useful at a lower confidence threshold than interruptive listening.
+    if speaker.active_track_id is None:
+        if speaker.confidence < config.policy_seek_min_confidence:
+            return SpeakerPolicyDecision(behavior, False, "speaker_seek_confidence_below_threshold")
+        azimuth = speaker.doa_azimuth_deg
+        if azimuth is not None:
+            if azimuth > 12.0:
+                motion = "sound_seek_right"
+            elif azimuth < -12.0:
+                motion = "sound_seek_left"
+            else:
+                motion = "sound_seek_center"
+            reason = "speech_no_face_with_doa"
+        else:
+            motion = "sound_seek_center"
+            reason = "speech_no_face_no_doa"
+        behavior.update(
+            {
+                "motion": motion,
+                "light": "listening_blue",
+                "sound": None,
+                "speech_text": None,
+            }
+        )
+        return SpeakerPolicyDecision(behavior, True, reason)
+
     if speaker.confidence < config.policy_min_confidence:
         return SpeakerPolicyDecision(behavior, False, "speaker_confidence_below_policy_threshold")
 
@@ -56,28 +83,5 @@ def apply_speaker_policy(
             }
         )
         return SpeakerPolicyDecision(behavior, True, "speaker_talking_elsewhere_do_not_interrupt")
-
-    if speaker.active_track_id is None:
-        azimuth = speaker.doa_azimuth_deg
-        if azimuth is not None:
-            if azimuth > 12.0:
-                motion = "sound_seek_right"
-            elif azimuth < -12.0:
-                motion = "sound_seek_left"
-            else:
-                motion = "sound_seek_center"
-            reason = "speech_no_face_with_doa"
-        else:
-            motion = "sound_seek_center"
-            reason = "speech_no_face_no_doa"
-        behavior.update(
-            {
-                "motion": motion,
-                "light": "listening_blue",
-                "sound": None,
-                "speech_text": None,
-            }
-        )
-        return SpeakerPolicyDecision(behavior, True, reason)
 
     return SpeakerPolicyDecision(behavior, False, "speaker_intent_unknown")

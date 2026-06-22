@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional
 
 import numpy as np
@@ -87,9 +87,16 @@ class FaceTracker:
 
     def _try_init_facemesh(self) -> None:
         try:
-            import mediapipe as mp  # type: ignore
+            try:
+                import mediapipe as mp  # type: ignore
+                face_mesh_module = mp.solutions.face_mesh
+            except Exception:
+                # Some Windows installs expose solutions only through the
+                # internal package path. Use it if available, otherwise fall
+                # back to the lower-face motion heuristic.
+                from mediapipe.python.solutions import face_mesh as face_mesh_module  # type: ignore
 
-            self._facemesh = mp.solutions.face_mesh.FaceMesh(
+            self._facemesh = face_mesh_module.FaceMesh(
                 static_image_mode=False,
                 max_num_faces=4,
                 refine_landmarks=False,
@@ -119,7 +126,7 @@ class FaceTracker:
             # The engagement detector already selected the most stable primary face.
             # Anchor speaker tracks to that bbox so the speaker system does not chase
             # Haar false positives around the room while the user is clearly centered.
-            bboxes = self._merge_primary_engagement_bbox(bboxes, engagement_result.face_bbox)
+            bboxes = self._merge_primary_engagement_bbox(bboxes, engagement_result.face_bbox, width, height)
         mesh_estimates = self._facemesh_mouth_estimates(frame) if self._facemesh_available else []
 
         matched_ids: set[str] = set()
@@ -145,7 +152,7 @@ class FaceTracker:
                 continue
             results.append(self._to_face_track(track, width, height, engagement_result, now_s))
         results.sort(key=lambda t: (t.center_norm[0], t.track_id))
-        return results
+        return self._with_presentation_ids(results)
 
     def close(self) -> None:
         if self._facemesh is not None:
@@ -168,16 +175,35 @@ class FaceTracker:
             out.append((x, y, w, h))
         return out
 
-    def _merge_primary_engagement_bbox(self, bboxes: list[BBox], primary_bbox: BBox) -> list[BBox]:
+    def _merge_primary_engagement_bbox(self, bboxes: list[BBox], primary_bbox: BBox, width: int, height: int) -> list[BBox]:
         merged: list[BBox] = [primary_bbox]
+        frame_area = max(float(width * height), 1.0)
+        secondary_min_area = max(0.0, float(self.speaker_config.secondary_face_min_area_ratio))
         for bbox in bboxes:
             # Drop near-duplicates of the primary engagement face. Keep other
-            # faces for multi-person awareness, but the centered engagement face
-            # should be the most stable candidate.
+            # faces for multi-person awareness only when they are large enough
+            # to be credible human faces. This suppresses common Haar false
+            # positives on TVs, chairs, windows, and wall texture.
             if _bbox_iou(bbox, primary_bbox) >= 0.18:
+                continue
+            area_ratio = (bbox[2] * bbox[3]) / frame_area
+            if area_ratio < secondary_min_area:
                 continue
             merged.append(bbox)
         return merged
+
+    def _with_presentation_ids(self, results: list[FaceTrack]) -> list[FaceTrack]:
+        """Expose per-frame person labels without pretending identity.
+
+        Internal tracks preserve continuity for mouth-motion smoothing, but the
+        public command/debug label should reflect the visible scene: one visible
+        person is always person_1; two visible people are person_1/person_2.
+        This matches the demo semantics and avoids confusing person_5 labels
+        when a single face briefly drops and reacquires.
+        """
+        if not results:
+            return []
+        return [replace(track, track_id=f"person_{idx}") for idx, track in enumerate(results, start=1)]
 
     def _match_existing_track(self, bbox: BBox, center_norm: tuple[float, float], now_s: float) -> _MutableTrack | None:
         best_track = None

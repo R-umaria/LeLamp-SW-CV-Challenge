@@ -118,6 +118,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mic-distance-m", type=float, default=0.08, help="Distance between left/right microphones in meters for DOA.")
     parser.add_argument("--speaker-fusion-interval", type=float, default=0.25, help="Seconds between active-speaker fusion passes. Runs in a worker thread by default.")
     parser.add_argument("--speaker-frame-width", type=int, default=640, help="Max frame width for speaker face tracking worker. Lower improves preview FPS.")
+    parser.add_argument("--speaker-policy-hold-s", type=float, default=1.15, help="Seconds to hold listening/sound-seek behavior after a high-confidence speaker decision.")
+    parser.add_argument("--speaker-seek-min-confidence", type=float, default=0.30, help="Minimum confidence for sound-seeking when speech is heard but no visible speaker is identified.")
+    parser.add_argument("--speaker-secondary-min-area", type=float, default=0.018, help="Minimum frame-area ratio for secondary speaker face candidates. Raises this to suppress false person_2 tracks.")
     parser.add_argument("--speaker-debug", action="store_true", help="Log detailed face-track and speaker-fusion diagnostics.")
 
     parser.add_argument("--interactive-recall", action="store_true", help="Debug only: allow terminal recall questions while the backend is running.")
@@ -317,6 +320,9 @@ def build_configs(
         debug=args.speaker_debug,
         fusion_interval_s=max(0.05, float(args.speaker_fusion_interval)),
         worker_frame_width=max(160, int(args.speaker_frame_width)),
+        policy_hold_s=max(0.0, float(args.speaker_policy_hold_s)),
+        policy_seek_min_confidence=max(0.0, min(1.0, float(args.speaker_seek_min_confidence))),
+        secondary_face_min_area_ratio=max(0.0, float(args.speaker_secondary_min_area)),
     )
     return (
         camera_config,
@@ -540,7 +546,7 @@ def main() -> int:
         args.ollama_keep_alive,
     )
     logger.info(
-        "Speaker awareness config audio_enabled=%s speaker_enabled=%s doa_enabled=%s device=%s sample_rate=%s block_ms=%s vad_threshold=%.2f mic_distance_m=%.3f fusion_interval=%.3f worker_frame_width=%s",
+        "Speaker awareness config audio_enabled=%s speaker_enabled=%s doa_enabled=%s device=%s sample_rate=%s block_ms=%s vad_threshold=%.2f mic_distance_m=%.3f fusion_interval=%.3f worker_frame_width=%s hold_s=%.2f seek_min_conf=%.2f secondary_min_area=%.3f",
         audio_config.enabled,
         speaker_config.enabled,
         doa_config.enabled,
@@ -551,6 +557,9 @@ def main() -> int:
         doa_config.mic_distance_m,
         speaker_config.fusion_interval_s,
         speaker_config.worker_frame_width,
+        speaker_config.policy_hold_s,
+        speaker_config.policy_seek_min_confidence,
+        speaker_config.secondary_face_min_area_ratio,
     )
     if speaker_config.enabled and not audio_config.enabled:
         reason_payload = {"event": "speaker_awareness_disabled_reason", "reason": "enable_speaker_awareness_without_enable_audio"}
@@ -574,6 +583,9 @@ def main() -> int:
     last_doa_result: DirectionOfArrivalResult | None = None
     last_speaker_result: ActiveSpeakerResult | None = None
     speaker_policy_decision = SpeakerPolicyDecision({}, False, "not_evaluated")
+    speaker_hold_behavior: dict | None = None
+    speaker_hold_reason = "not_held"
+    speaker_hold_until = 0.0
     gesture_result = HandGestureResult("unavailable", 0.0, "gesture_detection_disabled")
     fps_ema = 0.0
     last_godot_udp_send_ms = None
@@ -774,6 +786,16 @@ def main() -> int:
             speaker_policy_decision = apply_speaker_policy(behavior, last_speaker_result, transition.current_state, speaker_config)
             speaker_policy_ms = round((time.perf_counter() - t_policy) * 1000.0, 3)
             behavior = speaker_policy_decision.behavior
+            if speaker_policy_decision.overridden:
+                speaker_hold_behavior = dict(behavior)
+                speaker_hold_reason = speaker_policy_decision.reason
+                speaker_hold_until = now + speaker_config.policy_hold_s
+            elif speaker_hold_behavior is not None and now <= speaker_hold_until and transition.current_state != LampState.RECALLING:
+                behavior = dict(speaker_hold_behavior)
+                speaker_policy_decision = SpeakerPolicyDecision(behavior, True, f"speaker_policy_hold:{speaker_hold_reason}")
+            else:
+                speaker_hold_behavior = None
+                speaker_hold_reason = "not_held"
             if speaker_policy_decision.overridden:
                 append_jsonl(
                     speaker_event_paths,
