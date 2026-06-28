@@ -373,3 +373,20 @@ Useful flags:
 
 If gestures failed with `AttributeError: module 'mediapipe' has no attribute 'solutions'`, update to the 5.6.1 hotfix. The gesture detector now falls back from `mediapipe.solutions.hands` to `mediapipe.python.solutions.hands`, matching the compatibility approach already used in face tracking.
 
+
+## Milestone 5.6.2 Gesture Runtime Hotfix
+
+If gestures do not react and the log shows `gesture.status="unavailable"`, the gesture detector is not running. Diagnose the active venv with:
+
+```powershell
+python -m backend.tools.check_mediapipe_hands
+```
+
+If it fails, repair MediaPipe in the active venv:
+
+```powershell
+python -m pip uninstall -y mediapipe
+python -m pip install --no-cache-dir mediapipe==0.10.14
+```
+
+This patch also runs gesture detection before object detection and suppresses object detections overlapping an active gesture, so hand-heart/pinch/thumbs-up poses are not written as fake `cell phone` or `remote` memories.

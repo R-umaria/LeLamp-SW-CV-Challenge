@@ -67,6 +67,22 @@ from backend.utils.preview_window import PreviewWindow, PreviewWindowConfig
 from backend.utils.run_paths import create_run_paths, write_latest_pointer
 
 
+def _bbox_overlap_ratio(a: tuple[int, int, int, int] | None, b: tuple[int, int, int, int] | None) -> float:
+    """Return intersection area divided by the smaller box area for hand/object suppression."""
+    if a is None or b is None:
+        return 0.0
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    ax2, ay2 = ax + aw, ay + ah
+    bx2, by2 = bx + bw, by + bh
+    ix1, iy1 = max(ax, bx), max(ay, by)
+    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+    iw, ih = max(0, ix2 - ix1), max(0, iy2 - iy1)
+    intersection = iw * ih
+    smaller_area = max(1, min(aw * ah, bw * bh))
+    return float(intersection) / float(smaller_area)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Lumos backend: engagement + object memory + grounded recall")
     parser.add_argument("--camera-index", type=int, default=0)
@@ -763,6 +779,24 @@ def main() -> int:
                             last_doa_log_at = now
                             last_doa_signature = doa_signature
 
+            should_detect_gestures = gesture_config.enabled and (
+                last_gesture_detection_at == 0.0 or (now - last_gesture_detection_at >= gesture_config.interval_s)
+            )
+            if should_detect_gestures:
+                t0 = time.perf_counter()
+                gesture_result = gesture_detector.detect(frame, now=now)
+                gesture_detection_ms = round((time.perf_counter() - t0) * 1000.0, 3)
+                last_gesture_detection_at = now
+                if gesture_result.status in {"beckon", "palm_push", "thumbs_up", "pinch_follow", "heart"}:
+                    logger.info(
+                        "Detected gesture status=%s confidence=%.3f reason=%s target=%s latency_ms=%.3f",
+                        gesture_result.status,
+                        gesture_result.confidence,
+                        gesture_result.reason,
+                        gesture_result.hand_center_norm,
+                        gesture_detection_ms,
+                    )
+
             should_detect_objects = object_detector.enabled and (
                 last_object_detection_at == 0.0 or (now - last_object_detection_at >= object_config.interval_s)
             )
@@ -770,6 +804,23 @@ def main() -> int:
                 t0 = time.perf_counter()
                 display_detections = object_detector.detect(frame)
                 object_detection_ms = round((time.perf_counter() - t0) * 1000.0, 3)
+                if (
+                    gesture_result.status in {"beckon", "palm_push", "thumbs_up", "pinch_follow", "heart"}
+                    and gesture_result.hand_bbox is not None
+                ):
+                    before_hand_filter = len(display_detections)
+                    display_detections = [
+                        detection
+                        for detection in display_detections
+                        if _bbox_overlap_ratio(gesture_result.hand_bbox, detection.bbox) < 0.35
+                    ]
+                    removed_by_hand_filter = before_hand_filter - len(display_detections)
+                    if removed_by_hand_filter:
+                        logger.info(
+                            "Suppressed object detections overlapping active hand gesture count=%s gesture=%s",
+                            removed_by_hand_filter,
+                            gesture_result.status,
+                        )
                 last_object_detection_at = now
 
                 if display_detections:
@@ -799,24 +850,6 @@ def main() -> int:
                     memory_duplicate_skip_count,
                     memory_result.memory_write_ms,
                 )
-
-            should_detect_gestures = gesture_config.enabled and (
-                last_gesture_detection_at == 0.0 or (now - last_gesture_detection_at >= gesture_config.interval_s)
-            )
-            if should_detect_gestures:
-                t0 = time.perf_counter()
-                gesture_result = gesture_detector.detect(frame, now=now)
-                gesture_detection_ms = round((time.perf_counter() - t0) * 1000.0, 3)
-                last_gesture_detection_at = now
-                if gesture_result.status in {"beckon", "palm_push", "thumbs_up", "pinch_follow", "heart"}:
-                    logger.info(
-                        "Detected gesture status=%s confidence=%.3f reason=%s target=%s latency_ms=%.3f",
-                        gesture_result.status,
-                        gesture_result.confidence,
-                        gesture_result.reason,
-                        gesture_result.hand_center_norm,
-                        gesture_detection_ms,
-                    )
 
             if speaker_config.enabled and audio_config.enabled and speaker_worker.enabled:
                 if last_speaker_submit_at == 0.0 or (now - last_speaker_submit_at) >= speaker_config.fusion_interval_s:

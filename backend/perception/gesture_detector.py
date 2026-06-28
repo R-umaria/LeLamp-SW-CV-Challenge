@@ -34,21 +34,57 @@ try:  # MediaPipe is optional so the rest of Lumos can still run without it.
 except ImportError:  # pragma: no cover - exercised only when dependency is absent
     mp = None
 
-try:  # MediaPipe exposes solutions differently across some Windows wheels.
-    if mp is None:
-        mp_hands = None
-        _MEDIAPIPE_HANDS_IMPORT_ERROR = "mediapipe_not_installed"
-    else:
-        try:
-            mp_hands = mp.solutions.hands  # type: ignore[attr-defined]
-            _MEDIAPIPE_HANDS_IMPORT_ERROR = None
-        except Exception:
-            from mediapipe.python.solutions import hands as mp_hands  # type: ignore
 
-            _MEDIAPIPE_HANDS_IMPORT_ERROR = None
-except Exception as exc:  # pragma: no cover - optional dependency compatibility path
-    mp_hands = None
-    _MEDIAPIPE_HANDS_IMPORT_ERROR = str(exc)
+def _resolve_mediapipe_hands():
+    """Resolve MediaPipe Hands across wheel/layout variants.
+
+    Some Windows installations import ``mediapipe`` but do not expose
+    ``mediapipe.solutions`` on the package root. Others expose the module only
+    through importlib. We try every known Solutions import path before disabling
+    gestures, and we keep the real error text for the runtime logs.
+    """
+
+    if mp is None:
+        return None, "mediapipe_not_installed"
+
+    errors: list[str] = []
+
+    try:
+        solutions = getattr(mp, "solutions")
+        hands_module = getattr(solutions, "hands")
+        if hasattr(hands_module, "Hands"):
+            return hands_module, None
+        errors.append("mp.solutions.hands_missing_Hands")
+    except Exception as exc:
+        errors.append(f"mp.solutions.hands: {exc}")
+
+    import importlib
+
+    for module_name in (
+        "mediapipe.python.solutions.hands",
+        "mediapipe.solutions.hands",
+    ):
+        try:
+            hands_module = importlib.import_module(module_name)
+            if hasattr(hands_module, "Hands"):
+                return hands_module, None
+            errors.append(f"{module_name}: missing Hands")
+        except Exception as exc:
+            errors.append(f"{module_name}: {exc}")
+
+    try:
+        from mediapipe.python.solutions import hands as hands_module  # type: ignore
+
+        if hasattr(hands_module, "Hands"):
+            return hands_module, None
+        errors.append("from mediapipe.python.solutions import hands: missing Hands")
+    except Exception as exc:
+        errors.append(f"from mediapipe.python.solutions import hands: {exc}")
+
+    return None, " | ".join(errors) if errors else "unknown_mediapipe_hands_import_failure"
+
+
+mp_hands, _MEDIAPIPE_HANDS_IMPORT_ERROR = _resolve_mediapipe_hands()
 
 from backend.utils.config import HandGestureConfig
 
@@ -121,10 +157,12 @@ class HandGestureDetector:
         self._last_active_result: Optional[HandGestureResult] = None
         self._last_active_at = 0.0
 
+        self.unavailable_reason = _MEDIAPIPE_HANDS_IMPORT_ERROR or "mediapipe_unavailable"
+
         if config.enabled and mp_hands is None:
             self.logger.warning(
                 "Hand gestures requested but MediaPipe Hands is unavailable; gesture control is disabled reason=%s",
-                _MEDIAPIPE_HANDS_IMPORT_ERROR or "unknown",
+                self.unavailable_reason,
             )
             return
 
@@ -148,7 +186,7 @@ class HandGestureDetector:
         if not self.config.enabled:
             return HandGestureResult("unavailable", 0.0, "gesture_detection_disabled")
         if not self.enabled or self._hands is None:
-            return HandGestureResult("unavailable", 0.0, "mediapipe_unavailable")
+            return HandGestureResult("unavailable", 0.0, self.unavailable_reason or "mediapipe_unavailable")
 
         height, width = frame.shape[:2]
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
