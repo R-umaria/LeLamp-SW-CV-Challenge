@@ -19,6 +19,7 @@ except ImportError as exc:  # pragma: no cover - dependency guard
     raise ImportError("OpenCV is required for face tracking. Install opencv-python.") from exc
 
 from backend.perception.engagement_detector import BBox, EngagementResult
+from backend.perception.multi_face_detector import MultiFaceDetector
 from backend.utils.config import EngagementConfig, SpeakerAwarenessConfig
 
 
@@ -74,10 +75,7 @@ class FaceTracker:
         self.engagement_config = engagement_config
         self.speaker_config = speaker_config
         self.logger = logger or logging.getLogger("lelamp")
-        cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-        self.face_cascade = cv2.CascadeClassifier(cascade_path)
-        if self.face_cascade.empty():
-            raise RuntimeError(f"Failed to load OpenCV face cascade from: {cascade_path}")
+        self.face_detector = MultiFaceDetector(self.engagement_config, logger=self.logger)
         self._tracks: dict[str, _MutableTrack] = {}
         self._next_id = 1
         self._facemesh = None
@@ -115,13 +113,8 @@ class FaceTracker:
         height, width = frame.shape[:2]
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         gray = cv2.equalizeHist(gray)
-        faces = self.face_cascade.detectMultiScale(
-            gray,
-            scaleFactor=self.engagement_config.cascade_scale_factor,
-            minNeighbors=max(3, self.engagement_config.cascade_min_neighbors - 1),
-            minSize=self.engagement_config.cascade_min_size,
-        )
-        bboxes = self._filter_faces(faces, width, height)
+        face_detections = self.face_detector.detect(frame)
+        bboxes = [detection.bbox for detection in face_detections]
         if engagement_result is not None and engagement_result.face_bbox is not None:
             # The engagement detector already selected the most stable primary face.
             # Anchor speaker tracks to that bbox so the speaker system does not chase
@@ -161,6 +154,8 @@ class FaceTracker:
             except Exception:
                 pass
             self._facemesh = None
+        if hasattr(self, "face_detector"):
+            self.face_detector.close()
 
     def _filter_faces(self, faces, width: int, height: int) -> list[BBox]:
         frame_area = float(width * height)
@@ -180,10 +175,10 @@ class FaceTracker:
         frame_area = max(float(width * height), 1.0)
         secondary_min_area = max(0.0, float(self.speaker_config.secondary_face_min_area_ratio))
         for bbox in bboxes:
-            # Drop near-duplicates of the primary engagement face. Keep other
-            # faces for multi-person awareness only when they are large enough
-            # to be credible human faces. This suppresses common Haar false
-            # positives on TVs, chairs, windows, and wall texture.
+            # Drop near-duplicates of the primary engagement face, but do not
+            # collapse the scene to one person. Active-speaker awareness must
+            # keep credible secondary faces even when they are smaller or off
+            # center, because a non-primary person may be the one speaking.
             if _bbox_iou(bbox, primary_bbox) >= 0.18:
                 continue
             area_ratio = (bbox[2] * bbox[3]) / frame_area

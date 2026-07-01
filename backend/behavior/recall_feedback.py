@@ -42,7 +42,7 @@ def recall_target_for_result(result: Any) -> dict:
         }
 
     location_label = str(getattr(memory_record, "location_label", "center of view") or "center of view")
-    point = point_from_location_label(location_label)
+    point = point_from_memory_record(memory_record)
     return {
         "found": True,
         "object_label": getattr(memory_record, "normalized_label", None) or getattr(memory_record, "object_label", None),
@@ -52,7 +52,21 @@ def recall_target_for_result(result: Any) -> dict:
         "bbox": list(getattr(memory_record, "bbox", ()) or ()),
         "point_x_norm": point["x"],
         "point_y_norm": point["y"],
+        "target": {
+            "type": "point_to_memory",
+            "x_norm": point["x"],
+            "y_norm": point["y"],
+            "hold_sec": 5.0,
+        },
     }
+
+
+def point_from_memory_record(memory_record: Any) -> dict[str, float]:
+    x_norm = getattr(memory_record, "center_x_norm", None)
+    y_norm = getattr(memory_record, "center_y_norm", None)
+    if x_norm is not None and y_norm is not None:
+        return {"x": round(float(x_norm), 3), "y": round(float(y_norm), 3)}
+    return point_from_location_label(str(getattr(memory_record, "location_label", "center of view") or "center of view"))
 
 
 def point_from_location_label(location_label: str) -> dict[str, float]:

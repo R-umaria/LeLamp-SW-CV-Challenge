@@ -15,6 +15,19 @@ class SpeakerPolicyDecision:
     behavior: dict
     overridden: bool
     reason: str
+    do_not_interrupt: bool = False
+    quiet_listening: bool = False
+    safe_to_respond: bool = True
+    suppressed_behavior: str | None = None
+
+    def to_protocol_dict(self) -> dict:
+        return {
+            "do_not_interrupt": bool(self.do_not_interrupt),
+            "quiet_listening": bool(self.quiet_listening),
+            "safe_to_respond": bool(self.safe_to_respond),
+            "reason": self.reason,
+            "suppressed_behavior": self.suppressed_behavior,
+        }
 
 
 def apply_speaker_policy(
@@ -71,9 +84,12 @@ def apply_speaker_policy(
                 "speech_text": None,
             }
         )
-        return SpeakerPolicyDecision(behavior, True, "speaker_talking_to_lumos")
+        return SpeakerPolicyDecision(behavior, True, "speaker_talking_to_lumos", safe_to_respond=True)
 
     if speaker.active_track_id is not None and speaker.speaking_to_robot is False:
+        suppressed = None
+        if state == LampState.SEEKING_ATTENTION or behavior.get("sound") or behavior.get("speech_text"):
+            suppressed = str(behavior.get("motion") or "behavior")
         behavior.update(
             {
                 "motion": "listening_attentive",
@@ -82,6 +98,14 @@ def apply_speaker_policy(
                 "speech_text": None,
             }
         )
-        return SpeakerPolicyDecision(behavior, True, "speaker_talking_elsewhere_do_not_interrupt")
+        return SpeakerPolicyDecision(
+            behavior,
+            True,
+            "speaker_talking_elsewhere_do_not_interrupt",
+            do_not_interrupt=True,
+            quiet_listening=True,
+            safe_to_respond=False,
+            suppressed_behavior=suppressed,
+        )
 
     return SpeakerPolicyDecision(behavior, False, "speaker_intent_unknown")

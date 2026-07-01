@@ -50,6 +50,15 @@ class EngagementConfig:
     max_primary_center_distance: float = 0.35
     max_primary_area_change_ratio: float = 2.75
 
+    # Optional practical gaze/head-pose approximation. When MediaPipe Face Mesh
+    # is missing or fails for a frame, engagement falls back to face center/size.
+    head_pose_enabled: bool = True
+    head_pose_history: int = 5
+    head_pose_yaw_at_lamp_deg: float = 24.0
+    head_pose_pitch_at_lamp_deg: float = 22.0
+    head_pose_yaw_away_deg: float = 38.0
+    head_pose_pitch_away_deg: float = 32.0
+
 
 @dataclass(frozen=True)
 class SmoothingConfig:
@@ -220,7 +229,7 @@ class SpeakerAwarenessConfig:
     face_track_ttl_s: float = 1.25
     max_face_match_distance_norm: float = 0.28
     min_face_iou: float = 0.15
-    secondary_face_min_area_ratio: float = 0.018
+    secondary_face_min_area_ratio: float = 0.006
 
 
 
@@ -252,6 +261,20 @@ class SpeechToTextConfig:
     # Whisper fragments that are usually background noise or hallucination.
     min_chars: int = 5
     min_words: int = 2
+    require_wake_word: bool = False
+    wake_words: tuple[str, ...] = ("lumos", "hey lumos")
+    min_confidence: float = 0.0
+    intent_cooldown_s: float = 1.25
+
+
+@dataclass(frozen=True)
+class AudioOutputConfig:
+    enabled: bool = False
+    tts_enabled: bool = False
+    tts_rate: int = 175
+    tts_volume: float = 0.85
+    cue_cooldown_s: float = 1.0
+    speech_cooldown_s: float = 0.5
 
 
 
@@ -270,6 +293,7 @@ class AppConfig:
     doa: DirectionOfArrivalConfig = DirectionOfArrivalConfig()
     speaker_awareness: SpeakerAwarenessConfig = SpeakerAwarenessConfig()
     speech_to_text: SpeechToTextConfig = SpeechToTextConfig()
+    audio_output: AudioOutputConfig = AudioOutputConfig()
 
 
 DEFAULT_CONFIG = AppConfig()

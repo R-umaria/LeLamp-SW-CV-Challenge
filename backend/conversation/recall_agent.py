@@ -461,10 +461,20 @@ def deterministic_recall_answer(parsed: ParsedObjectQuery, memory_record: Memory
 def deterministic_object_answer(parsed: ParsedObjectQuery, memory_record: MemoryRecord) -> str:
     display_label = _display_object_label(parsed, memory_record)
     time_text = _friendly_time(memory_record.timestamp)
+    precision = _memory_location_phrase(memory_record)
     return (
-        f"I last saw your {display_label} on the {memory_record.location_label} "
+        f"I last saw your {display_label} {precision} "
         f"around {time_text}. My confidence was {memory_record.confidence:.2f}."
     )
+
+
+def _memory_location_phrase(memory_record: MemoryRecord) -> str:
+    location = (memory_record.location_label or "somewhere in my camera view").strip()
+    if memory_record.center_x_norm is not None and memory_record.center_y_norm is not None:
+        return f"on the {location} of my camera view"
+    # Old database rows only know the original coarse location label. Keep the
+    # answer honest and do not imply calibrated 3D/world coordinates.
+    return f"on the {location}"
 
 
 def deterministic_no_memory_answer(parsed: ParsedObjectQuery) -> str:
@@ -504,6 +514,11 @@ def _memory_record_for_llm(memory_record: MemoryRecord) -> dict:
         "confidence": round(float(memory_record.confidence), 3),
         "timestamp": memory_record.timestamp,
         "source": memory_record.source,
+        "center_x_norm": memory_record.center_x_norm,
+        "center_y_norm": memory_record.center_y_norm,
+        "zone_x": memory_record.zone_x,
+        "zone_y": memory_record.zone_y,
+        "distance_hint": memory_record.distance_hint,
     }
 
 

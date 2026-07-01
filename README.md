@@ -1,19 +1,26 @@
-# Lumos Current Patch — Hand Gestures + Motion Polish
+# Lumos Current Patch — Milestone 5.0 Final Challenge Hardening + IK Embodiment
 
-This version adds optional MediaPipe hand gesture control, wider face-follow stability, Pixar-style elbow-hump motion targets, and richer pre-sleep scanning.
+This version hardens Lumos for the SW/CV Challenge with approximate head-pose engagement fusion, structured object memory localization, optional non-blocking sound/TTS output, stricter STT recall gating, lightweight interruption awareness, evaluation scripts, and a bounded Godot IK/reverse-kinematics embodiment layer.
 
-Recommended demo run:
+Recommended reliable demo run:
 
 ```powershell
-python -m backend.main --show-window --godot-udp --enable-gestures --enable-objects --enable-web-chat --preview-flip-horizontal
+python -m backend.main --show-window --godot-udp --enable-objects --save-object-frames --enable-web-chat --use-llm --ollama-url http://10.0.0.70:11434 --ollama-model qwen2.5:1.5b --preview-flip-horizontal
 ```
 
-Gesture controls:
+Optional voice/STT/TTS run:
 
-- Index-finger beckon/call gesture: Lumos uses `gesture_approach` and shifts closer to the camera.
-- Open palm facing the camera: Lumos uses `gesture_retreat` and shifts away.
+```powershell
+python -m backend.main --show-window --godot-udp --enable-objects --save-object-frames --enable-web-chat --enable-audio --enable-stt --stt-backend faster_whisper --stt-model-size tiny.en --stt-device cpu --stt-compute-type int8 --stt-require-wake-word --stt-wake-words Lumos,"hey Lumos" --enable-audio-output --enable-tts --use-llm --ollama-url http://10.0.0.70:11434 --ollama-model qwen2.5:1.5b --preview-flip-horizontal
+```
 
-See `docs/milestone4_6_hand_gesture_motion.md` for implementation details and tuning notes.
+Run validation:
+
+```powershell
+python -m pytest
+```
+
+See `docs/milestone5_0_final_hardening_ik.md` for the full implementation summary and `docs/evaluation_quickstart.md` for labeled engagement evaluation.
 
 ---
 

@@ -97,15 +97,24 @@ class SceneMemory:
                 confidence=detection.confidence,
                 source=source,
                 frame_path=frame_path,
+                center_x_norm=getattr(detection, "center_x_norm", None),
+                center_y_norm=getattr(detection, "center_y_norm", None),
+                zone_x=getattr(detection, "zone_x", None),
+                zone_y=getattr(detection, "zone_y", None),
+                distance_hint=getattr(detection, "distance_hint", None),
+                pointing_target=getattr(detection, "pointing_target", None),
             )
             self.store.insert(record)
             written.append(record)
             self.logger.info(
-                "Memory write id=%s label=%s normalized=%s location=%s conf=%.2f bbox=%s frame=%s",
+                "Memory write id=%s label=%s normalized=%s location=%s zone=%s/%s point=%s conf=%.2f bbox=%s frame=%s",
                 record.id,
                 record.object_label,
                 record.normalized_label,
                 record.location_label,
+                record.zone_x or "",
+                record.zone_y or "",
+                record.pointing_target or {},
                 record.confidence,
                 list(record.bbox),
                 record.frame_path,

@@ -1,4 +1,4 @@
-"""Face-presence and face-position engagement detector.
+"""Primary-face engagement detector built on top of multi-face detection.
 
 Milestone 1.5 still avoids heavy gaze/head-pose dependencies. It improves the
 Milestone 1 OpenCV-only detector by:
@@ -23,6 +23,8 @@ except ImportError as exc:  # pragma: no cover - dependency guard
     ) from exc
 
 from backend.utils.config import EngagementConfig
+from backend.perception.multi_face_detector import FaceDetection, MultiFaceDetector
+from backend.perception.head_pose_estimator import HeadPoseEstimator, HeadPoseResult
 
 
 BBox = tuple[int, int, int, int]
@@ -47,6 +49,13 @@ class EngagementResult:
     raw_face_count: int = 0
     candidate_count: int = 0
     selected_face_score: float = 0.0
+    head_pose_status: str = "unknown"
+    head_pose_confidence: float = 0.0
+    yaw: Optional[float] = None
+    pitch: Optional[float] = None
+    roll: Optional[float] = None
+    head_pose_reason: str = "not_evaluated"
+    fallback_mode_used: bool = True
 
     def to_protocol_dict(self) -> dict:
         # Preserve the existing command protocol and add optional normalized face
@@ -61,6 +70,15 @@ class EngagementResult:
             payload["face_x_norm"] = round(float(self.face_center_norm[0]), 3)
             payload["face_y_norm"] = round(float(self.face_center_norm[1]), 3)
             payload["face_area_ratio"] = round(float(self.face_area_ratio), 4)
+        if self.yaw is not None:
+            payload["yaw"] = round(float(self.yaw), 2)
+        if self.pitch is not None:
+            payload["pitch"] = round(float(self.pitch), 2)
+        if self.roll is not None:
+            payload["roll"] = round(float(self.roll), 2)
+        payload["head_pose_status"] = self.head_pose_status
+        payload["head_pose_confidence"] = round(float(self.head_pose_confidence), 3)
+        payload["fallback_mode_used"] = bool(self.fallback_mode_used)
         return payload
 
     def to_log_dict(self) -> dict:
@@ -68,62 +86,69 @@ class EngagementResult:
         data["confidence"] = round(float(self.confidence), 3)
         data["face_area_ratio"] = round(float(self.face_area_ratio), 4)
         data["selected_face_score"] = round(float(self.selected_face_score), 3)
+        data["head_pose_confidence"] = round(float(self.head_pose_confidence), 3)
+        if self.yaw is not None:
+            data["yaw"] = round(float(self.yaw), 2)
+        if self.pitch is not None:
+            data["pitch"] = round(float(self.pitch), 2)
+        if self.roll is not None:
+            data["roll"] = round(float(self.roll), 2)
         return data
 
 
 class FaceEngagementDetector:
     def __init__(self, config: EngagementConfig) -> None:
         self.config = config
-        cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-        self.face_cascade = cv2.CascadeClassifier(cascade_path)
-        if self.face_cascade.empty():
-            raise RuntimeError(f"Failed to load OpenCV face cascade from: {cascade_path}")
-
+        self.face_detector = MultiFaceDetector(self.config)
+        self.head_pose_estimator = HeadPoseEstimator(
+            enabled=getattr(config, "head_pose_enabled", True),
+            max_history=getattr(config, "head_pose_history", 5),
+            yaw_at_lamp_deg=getattr(config, "head_pose_yaw_at_lamp_deg", 24.0),
+            pitch_at_lamp_deg=getattr(config, "head_pose_pitch_at_lamp_deg", 22.0),
+            yaw_away_deg=getattr(config, "head_pose_yaw_away_deg", 38.0),
+            pitch_away_deg=getattr(config, "head_pose_pitch_away_deg", 32.0),
+        )
         self._primary_bbox: Optional[BBox] = None
-        self._clahe = None
-        if self.config.use_clahe:
-            self._clahe = cv2.createCLAHE(
-                clipLimit=self.config.clahe_clip_limit,
-                tileGridSize=self.config.clahe_tile_grid_size,
-            )
 
     def detect(self, frame) -> EngagementResult:
         height, width = frame.shape[:2]
-        gray = self._preprocess(frame)
+        detections = self.face_detector.detect(frame)
 
-        faces = self.face_cascade.detectMultiScale(
-            gray,
-            scaleFactor=self.config.cascade_scale_factor,
-            minNeighbors=self.config.cascade_min_neighbors,
-            minSize=self.config.cascade_min_size,
-        )
-
-        candidates = self._build_candidates(faces, width, height)
+        candidates = self._build_candidates_from_detections(detections)
         if not candidates:
             return EngagementResult(
                 status="absent",
                 confidence=0.0,
-                reason="no_stable_face_candidate" if len(faces) else "no_face_detected",
-                raw_face_count=int(len(faces)),
+                reason="no_stable_face_candidate" if len(detections) else "no_face_detected",
+                raw_face_count=int(len(detections)),
                 candidate_count=0,
             )
 
         selected = self._select_primary_candidate(candidates)
         self._primary_bbox = selected.bbox
-        return self._classify_candidate(selected, width, height, raw_face_count=int(len(faces)), candidate_count=len(candidates))
+        head_pose = self.head_pose_estimator.estimate(frame, selected.bbox)
+        return self._classify_candidate(
+            selected,
+            width,
+            height,
+            raw_face_count=int(len(detections)),
+            candidate_count=len(candidates),
+            head_pose=head_pose,
+        )
 
-    def _preprocess(self, frame):
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        if self.config.blur_kernel_size and self.config.blur_kernel_size > 1:
-            k = self.config.blur_kernel_size
-            if k % 2 == 0:
-                k += 1
-            gray = cv2.GaussianBlur(gray, (k, k), 0)
-        if self._clahe is not None:
-            gray = self._clahe.apply(gray)
-        else:
-            gray = cv2.equalizeHist(gray)
-        return gray
+    def close(self) -> None:
+        self.face_detector.close()
+        self.head_pose_estimator.close()
+
+    def _build_candidates_from_detections(self, detections: Sequence[FaceDetection]) -> list[FaceCandidate]:
+        return [
+            FaceCandidate(
+                bbox=detection.bbox,
+                center_norm=detection.center_norm,
+                area_ratio=detection.area_ratio,
+            )
+            for detection in detections
+        ]
 
     def _build_candidates(self, faces: Sequence, width: int, height: int) -> list[FaceCandidate]:
         candidates: list[FaceCandidate] = []
@@ -208,6 +233,7 @@ class FaceEngagementDetector:
         height: int,
         raw_face_count: int,
         candidate_count: int,
+        head_pose: HeadPoseResult | None = None,
     ) -> EngagementResult:
         x, y, w, h = candidate.bbox
         cx, cy = candidate.center_norm
@@ -220,18 +246,60 @@ class FaceEngagementDetector:
         vertically_centered = y_offset <= self.config.center_tolerance_y
         face_large_enough = area_ratio >= self.config.min_face_area_ratio
 
+        pose_status = "unknown" if head_pose is None else head_pose.classification
+        pose_confidence = 0.0 if head_pose is None else float(head_pose.confidence)
+        pose_available = bool(head_pose is not None and head_pose.available)
+        pose_reason = "not_evaluated" if head_pose is None else head_pose.reason
+        fallback_mode_used = not pose_available or pose_status == "unknown"
+
+        # Head pose is the stronger signal when available. This addresses the
+        # challenge requirement for practical gaze/head-pose approximation while
+        # preserving the old geometry fallback when MediaPipe/solvePnP fails.
+        if pose_available and pose_status in {"looking_left", "looking_right", "looking_down", "looking_away"}:
+            confidence = max(0.55, min(0.96, pose_confidence))
+            return self._result_from_candidate(
+                "disengaged",
+                confidence,
+                pose_status,
+                candidate,
+                raw_face_count,
+                candidate_count,
+                head_pose,
+                fallback_mode_used=False,
+            )
+
         if horizontally_centered and vertically_centered and face_large_enough:
             confidence = self._engaged_confidence(x_offset, y_offset, area_ratio, candidate.selection_score)
-            return EngagementResult(
-                status="engaged",
-                confidence=confidence,
-                reason="face_centered",
-                face_bbox=(int(x), int(y), int(w), int(h)),
-                face_center_norm=(round(cx, 3), round(cy, 3)),
-                face_area_ratio=area_ratio,
-                raw_face_count=raw_face_count,
-                candidate_count=candidate_count,
-                selected_face_score=candidate.selection_score,
+            reason = "face_centered"
+            if pose_available and pose_status == "looking_at_lamp":
+                confidence = min(0.99, max(confidence, 0.58 + 0.35 * pose_confidence))
+                reason = "head_pose_looking_at_lamp+face_centered"
+                fallback_mode_used = False
+            return self._result_from_candidate(
+                "engaged",
+                confidence,
+                reason,
+                candidate,
+                raw_face_count,
+                candidate_count,
+                head_pose,
+                fallback_mode_used=fallback_mode_used,
+            )
+
+        # A confident forward head pose can rescue slightly off-center faces, but
+        # not tiny/far-away faces. This makes engagement less dependent on exact
+        # face-center placement without making every visible face "engaged".
+        if pose_available and pose_status == "looking_at_lamp" and face_large_enough:
+            confidence = min(0.94, max(0.64, 0.50 + 0.30 * pose_confidence + 0.10 * candidate.selection_score))
+            return self._result_from_candidate(
+                "engaged",
+                confidence,
+                "head_pose_looking_at_lamp",
+                candidate,
+                raw_face_count,
+                candidate_count,
+                head_pose,
+                fallback_mode_used=False,
             )
 
         reason_parts: list[str] = []
@@ -243,16 +311,51 @@ class FaceEngagementDetector:
             reason_parts.append("face_too_small")
 
         confidence = self._disengaged_confidence(x_offset, y_offset, area_ratio, candidate.selection_score)
+        reason = "+".join(reason_parts) or "face_not_centered"
+        if head_pose is not None and head_pose.reason and fallback_mode_used:
+            reason = f"{reason}+pose_fallback:{head_pose.reason}"
+        return self._result_from_candidate(
+            "disengaged",
+            confidence,
+            reason,
+            candidate,
+            raw_face_count,
+            candidate_count,
+            head_pose,
+            fallback_mode_used=fallback_mode_used,
+        )
+
+    def _result_from_candidate(
+        self,
+        status: str,
+        confidence: float,
+        reason: str,
+        candidate: FaceCandidate,
+        raw_face_count: int,
+        candidate_count: int,
+        head_pose: HeadPoseResult | None,
+        *,
+        fallback_mode_used: bool,
+    ) -> EngagementResult:
+        x, y, w, h = candidate.bbox
+        cx, cy = candidate.center_norm
         return EngagementResult(
-            status="disengaged",
-            confidence=confidence,
-            reason="+".join(reason_parts) or "face_not_centered",
+            status=status,
+            confidence=float(confidence),
+            reason=reason,
             face_bbox=(int(x), int(y), int(w), int(h)),
             face_center_norm=(round(cx, 3), round(cy, 3)),
-            face_area_ratio=area_ratio,
+            face_area_ratio=candidate.area_ratio,
             raw_face_count=raw_face_count,
             candidate_count=candidate_count,
             selected_face_score=candidate.selection_score,
+            head_pose_status="unknown" if head_pose is None else head_pose.classification,
+            head_pose_confidence=0.0 if head_pose is None else float(head_pose.confidence),
+            yaw=None if head_pose is None else head_pose.yaw,
+            pitch=None if head_pose is None else head_pose.pitch,
+            roll=None if head_pose is None else head_pose.roll,
+            head_pose_reason="not_evaluated" if head_pose is None else head_pose.reason,
+            fallback_mode_used=bool(fallback_mode_used),
         )
 
     def _engaged_confidence(
@@ -295,6 +398,7 @@ def draw_engagement_overlay(
         f"state={state} dwell={state_elapsed_s:.1f}s fps={fps:.1f}",
         f"raw={raw_result.status} smoothed={smoothed_result.status} conf={smoothed_result.confidence:.2f}",
         f"reason={smoothed_result.reason}",
+        f"pose={smoothed_result.head_pose_status} yaw={smoothed_result.yaw if smoothed_result.yaw is not None else 'n/a'} pitch={smoothed_result.pitch if smoothed_result.pitch is not None else 'n/a'}",
         f"area={smoothed_result.face_area_ratio:.3f} raw_faces={raw_result.raw_face_count} candidates={raw_result.candidate_count}",
     ]
     for idx, line in enumerate(lines):

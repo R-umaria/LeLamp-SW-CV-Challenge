@@ -31,6 +31,12 @@ class MemoryRecord:
     timestamp: str
     source: str = "webcam"
     frame_path: Optional[str] = None
+    center_x_norm: Optional[float] = None
+    center_y_norm: Optional[float] = None
+    zone_x: Optional[str] = None
+    zone_y: Optional[str] = None
+    distance_hint: Optional[str] = None
+    pointing_target: Optional[dict] = None
 
     @classmethod
     def create(
@@ -43,6 +49,12 @@ class MemoryRecord:
         source: str = "webcam",
         frame_path: str | None = None,
         timestamp: str | None = None,
+        center_x_norm: float | None = None,
+        center_y_norm: float | None = None,
+        zone_x: str | None = None,
+        zone_y: str | None = None,
+        distance_hint: str | None = None,
+        pointing_target: dict | None = None,
     ) -> "MemoryRecord":
         return cls(
             id=str(uuid.uuid4()),
@@ -54,6 +66,12 @@ class MemoryRecord:
             timestamp=timestamp or datetime.now().isoformat(timespec="seconds"),
             source=source,
             frame_path=frame_path,
+            center_x_norm=None if center_x_norm is None else float(center_x_norm),
+            center_y_norm=None if center_y_norm is None else float(center_y_norm),
+            zone_x=zone_x,
+            zone_y=zone_y,
+            distance_hint=distance_hint,
+            pointing_target=pointing_target,
         )
 
     def to_row(self) -> dict:
@@ -67,6 +85,12 @@ class MemoryRecord:
             "timestamp": self.timestamp,
             "source": self.source,
             "frame_path": self.frame_path,
+            "center_x_norm": self.center_x_norm,
+            "center_y_norm": self.center_y_norm,
+            "zone_x": self.zone_x,
+            "zone_y": self.zone_y,
+            "distance_hint": self.distance_hint,
+            "pointing_target": json.dumps(self.pointing_target) if self.pointing_target is not None else None,
         }
 
     def to_dict(self) -> dict:
@@ -80,6 +104,12 @@ class MemoryRecord:
             "timestamp": self.timestamp,
             "source": self.source,
             "frame_path": self.frame_path,
+            "center_x_norm": None if self.center_x_norm is None else round(float(self.center_x_norm), 3),
+            "center_y_norm": None if self.center_y_norm is None else round(float(self.center_y_norm), 3),
+            "zone_x": self.zone_x,
+            "zone_y": self.zone_y,
+            "distance_hint": self.distance_hint,
+            "pointing_target": self.pointing_target,
         }
 
 
@@ -118,7 +148,13 @@ class MemoryStore:
                     confidence REAL NOT NULL,
                     timestamp TEXT NOT NULL,
                     source TEXT NOT NULL,
-                    frame_path TEXT
+                    frame_path TEXT,
+                    center_x_norm REAL,
+                    center_y_norm REAL,
+                    zone_x TEXT,
+                    zone_y TEXT,
+                    distance_hint TEXT,
+                    pointing_target TEXT
                 )
                 """
             )
@@ -128,6 +164,21 @@ class MemoryStore:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_object_memory_location_time ON object_memory(location_label, timestamp)"
             )
+            self._ensure_optional_columns(conn)
+
+    def _ensure_optional_columns(self, conn: sqlite3.Connection) -> None:
+        existing = {str(row["name"]) for row in conn.execute("PRAGMA table_info(object_memory)").fetchall()}
+        optional_columns = {
+            "center_x_norm": "REAL",
+            "center_y_norm": "REAL",
+            "zone_x": "TEXT",
+            "zone_y": "TEXT",
+            "distance_hint": "TEXT",
+            "pointing_target": "TEXT",
+        }
+        for name, ddl_type in optional_columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE object_memory ADD COLUMN {name} {ddl_type}")
 
     def insert(self, record: MemoryRecord) -> None:
         row = record.to_row()
@@ -143,7 +194,13 @@ class MemoryStore:
                     confidence,
                     timestamp,
                     source,
-                    frame_path
+                    frame_path,
+                    center_x_norm,
+                    center_y_norm,
+                    zone_x,
+                    zone_y,
+                    distance_hint,
+                    pointing_target
                 ) VALUES (
                     :id,
                     :object_label,
@@ -153,7 +210,13 @@ class MemoryStore:
                     :confidence,
                     :timestamp,
                     :source,
-                    :frame_path
+                    :frame_path,
+                    :center_x_norm,
+                    :center_y_norm,
+                    :zone_x,
+                    :zone_y,
+                    :distance_hint,
+                    :pointing_target
                 )
                 """,
                 row,
@@ -302,7 +365,40 @@ class MemoryStore:
             timestamp=str(row["timestamp"]),
             source=str(row["source"]),
             frame_path=row["frame_path"],
+            center_x_norm=self._optional_float(row, "center_x_norm"),
+            center_y_norm=self._optional_float(row, "center_y_norm"),
+            zone_x=self._optional_str(row, "zone_x"),
+            zone_y=self._optional_str(row, "zone_y"),
+            distance_hint=self._optional_str(row, "distance_hint"),
+            pointing_target=self._optional_json(row, "pointing_target"),
         )
+
+    @staticmethod
+    def _row_has(row: sqlite3.Row, key: str) -> bool:
+        return key in row.keys()
+
+    @classmethod
+    def _optional_float(cls, row: sqlite3.Row, key: str) -> float | None:
+        if not cls._row_has(row, key) or row[key] is None:
+            return None
+        return float(row[key])
+
+    @classmethod
+    def _optional_str(cls, row: sqlite3.Row, key: str) -> str | None:
+        if not cls._row_has(row, key) or row[key] is None:
+            return None
+        value = str(row[key])
+        return value if value else None
+
+    @classmethod
+    def _optional_json(cls, row: sqlite3.Row, key: str) -> dict | None:
+        if not cls._row_has(row, key) or row[key] in (None, ""):
+            return None
+        try:
+            parsed = json.loads(str(row[key]))
+            return parsed if isinstance(parsed, dict) else None
+        except Exception:
+            return None
 
 
 def records_to_table(records: Iterable[MemoryRecord]) -> str:

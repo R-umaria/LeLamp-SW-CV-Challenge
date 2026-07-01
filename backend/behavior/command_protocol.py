@@ -22,6 +22,8 @@ def build_behavior_command(
     gesture: Optional[Mapping] = None,
     recall_target: Optional[Mapping] = None,
     speaker: Optional[Mapping] = None,
+    interruption: Optional[Mapping] = None,
+    target: Optional[Mapping] = None,
 ) -> dict:
     command = {
         "timestamp": datetime.now().isoformat(timespec="seconds"),
@@ -39,8 +41,15 @@ def build_behavior_command(
     }
     if recall_target is not None:
         command["memory"]["recall_target"] = dict(recall_target)
+        nested_target = recall_target.get("target") if isinstance(recall_target, Mapping) else None
+        if target is None and isinstance(nested_target, Mapping):
+            target = nested_target
+    if target is not None:
+        command["target"] = dict(target)
     if gesture is not None:
         command["gesture"] = dict(gesture)
     if speaker is not None:
         command["speaker"] = dict(speaker)
+    if interruption is not None:
+        command["interruption"] = dict(interruption)
     return command

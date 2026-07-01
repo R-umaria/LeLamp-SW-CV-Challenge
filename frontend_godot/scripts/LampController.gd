@@ -11,6 +11,7 @@ const JOINT_WRIST_YAW: int = 4
 const JOINT_HEAD_TILT: int = 5
 const MotionSkillLibrary = preload("res://scripts/lumos/MotionSkillLibrary.gd")
 const LightSkillLibrary = preload("res://scripts/lumos/LightSkillLibrary.gd")
+const IkSolver = preload("res://scripts/lumos/IkSolver.gd")
 
 @export var face_follow_max_degrees: float = 82.0
 @export var face_follow_vertical_max_degrees: float = 46.0
@@ -58,6 +59,8 @@ const LightSkillLibrary = preload("res://scripts/lumos/LightSkillLibrary.gd")
 @export var smooth_light_enabled: bool = true
 @export var light_color_slew_per_second: float = 1.90
 @export var light_energy_slew_per_second: float = 1.35
+@export var ik_enabled: bool = true
+@export var ik_blend_weight: float = 0.72
 
 @onready var base_yaw: Node3D = $BaseYaw_DOF1
 @onready var shoulder_pitch: Node3D = $BaseYaw_DOF1/ShoulderPitch_DOF2
@@ -99,6 +102,13 @@ var speaker_confidence: float = 0.0
 var speaker_reason: String = ""
 var speaker_doa_has_hint: bool = false
 var speaker_doa_azimuth_deg: float = 0.0
+var command_target_type: String = ""
+var command_target_x_norm: float = -1.0
+var command_target_y_norm: float = -1.0
+var command_target_hold_sec: float = 0.0
+var ik_debug_target_position: Vector3 = Vector3.ZERO
+var ik_debug_workspace_clamped: bool = false
+var ik_debug_joint_clamps: Dictionary = {}
 
 var _time: float = 0.0
 var _motion_started_at: float = 0.0
@@ -210,6 +220,16 @@ func apply_command(command: Dictionary) -> void:
 	recall_point_x_norm = _optional_norm_float(recall_target, "point_x_norm", -1.0)
 	recall_point_y_norm = _optional_norm_float(recall_target, "point_y_norm", -1.0)
 	recall_location_label = str(recall_target.get("location_label", ""))
+
+	var target: Dictionary = _dictionary_value(command, "target")
+	_parse_command_target(target)
+
+
+func _parse_command_target(target: Dictionary) -> void:
+	command_target_type = str(target.get("type", ""))
+	command_target_x_norm = _optional_norm_float(target, "x_norm", -1.0)
+	command_target_y_norm = _optional_norm_float(target, "y_norm", -1.0)
+	command_target_hold_sec = maxf(0.0, float(target.get("hold_sec", 0.0)))
 
 
 func _parse_speaker_command(speaker: Dictionary) -> void:
@@ -380,6 +400,31 @@ func _can_use_distance_follow() -> bool:
 	return true
 
 
+func _active_ik_target_type() -> String:
+	if command_target_type != "":
+		return command_target_type
+	var skill: String = MotionSkillLibrary.normalize_motion(current_motion)
+	if skill == "recall_point" and recall_target_found:
+		return "point_to_memory"
+	if skill == "attentive_follow" or skill == "active_listen" or skill == "listening_attentive":
+		return "look_at_user"
+	if skill == "searching_glance_slow" or skill == "sound_seek_left" or skill == "sound_seek_right" or skill == "sound_seek_center":
+		return "scanning"
+	if skill == "sleep_rest":
+		return "sleep_rest"
+	return ""
+
+
+func _active_ik_source() -> Vector2:
+	if command_target_x_norm >= 0.0 and command_target_y_norm >= 0.0:
+		return Vector2(command_target_x_norm, command_target_y_norm)
+	if current_motion == "recall_point" and recall_target_found:
+		return Vector2(recall_point_x_norm, recall_point_y_norm)
+	if face_x_norm >= 0.0 and face_y_norm >= 0.0:
+		return Vector2(face_x_norm, face_y_norm)
+	return Vector2(-1.0, -1.0)
+
+
 func _set_target_from_degrees(target_degrees: PackedFloat32Array) -> void:
 	if target_degrees.size() < MotionSkillLibrary.TARGET_SIZE:
 		return
@@ -410,6 +455,33 @@ func _set_target_from_degrees(target_degrees: PackedFloat32Array) -> void:
 		elbow_pitch_deg += back_shift * distance_reach_elbow_back_degrees
 		wrist_pitch_deg += back_shift * distance_reach_wrist_back_degrees
 		head_tilt_deg += back_shift * distance_reach_head_back_degrees
+
+	var ik_target_type: String = _active_ik_target_type()
+	var ik_source: Vector2 = _active_ik_source()
+	if ik_enabled and ik_target_type != "" and ik_source.x >= 0.0 and ik_source.y >= 0.0:
+		var ik: Dictionary = IkSolver.solve_normalized_target(ik_target_type, ik_source.x, ik_source.y, reach_shift)
+		var ik_base: Dictionary = ik["base_yaw_deg"] as Dictionary
+		var ik_shoulder: Dictionary = ik["shoulder_pitch_deg"] as Dictionary
+		var ik_elbow: Dictionary = ik["elbow_pitch_deg"] as Dictionary
+		var ik_wrist_pitch: Dictionary = ik["wrist_pitch_deg"] as Dictionary
+		var ik_wrist_yaw: Dictionary = ik["wrist_yaw_deg"] as Dictionary
+		var ik_head: Dictionary = ik["head_tilt_deg"] as Dictionary
+		base_yaw_deg = lerpf(base_yaw_deg, float(ik_base["value"]), ik_blend_weight)
+		shoulder_pitch_deg = lerpf(shoulder_pitch_deg, float(ik_shoulder["value"]), ik_blend_weight)
+		elbow_pitch_deg = lerpf(elbow_pitch_deg, float(ik_elbow["value"]), ik_blend_weight)
+		wrist_pitch_deg = lerpf(wrist_pitch_deg, float(ik_wrist_pitch["value"]), ik_blend_weight)
+		wrist_yaw_deg = lerpf(wrist_yaw_deg, float(ik_wrist_yaw["value"]), ik_blend_weight)
+		head_tilt_deg = lerpf(head_tilt_deg, float(ik_head["value"]), ik_blend_weight)
+		ik_debug_target_position = ik["target_position"]
+		ik_debug_workspace_clamped = bool(ik["workspace_clamped"])
+		ik_debug_joint_clamps = {
+			"base_yaw": bool(ik_base["clamped"]),
+			"shoulder_pitch": bool(ik_shoulder["clamped"]),
+			"elbow_pitch": bool(ik_elbow["clamped"]),
+			"wrist_pitch": bool(ik_wrist_pitch["clamped"]),
+			"wrist_yaw": bool(ik_wrist_yaw["clamped"]),
+			"head_tilt": bool(ik_head["clamped"]),
+		}
 
 	base_yaw_deg = clampf(base_yaw_deg, -155.0, 155.0)
 	shoulder_pitch_deg = clampf(shoulder_pitch_deg, -100.0, 100.0)

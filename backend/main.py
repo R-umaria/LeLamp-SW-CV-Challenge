@@ -33,6 +33,8 @@ from backend.audio.audio_capture import AudioCaptureWorker
 from backend.audio.gcc_phat import DirectionOfArrivalResult, estimate_direction_of_arrival
 from backend.audio.voice_activity_detector import VoiceActivityDetector, VoiceActivityResult
 from backend.audio.speech_to_text import SpeechToTextWorker, SpeechTranscript, UtteranceSegmenter
+from backend.audio.stt_intent_gate import STTIntentGate, parse_wake_words
+from backend.audio.audio_output import AudioOutputWorker
 from backend.behavior.state_machine import InteractionStateMachine, LampState
 from backend.conversation.chat_udp_receiver import ChatUdpReceiver
 from backend.conversation.recall_agent import RecallAgent
@@ -58,6 +60,7 @@ from backend.utils.config import (
     ObjectDetectionConfig,
     SpeakerAwarenessConfig,
     SpeechToTextConfig,
+    AudioOutputConfig,
     RuntimeConfig,
     SmoothingConfig,
     StateMachineConfig,
@@ -139,7 +142,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--speaker-frame-width", type=int, default=640, help="Max frame width for speaker face tracking worker. Lower improves preview FPS.")
     parser.add_argument("--speaker-policy-hold-s", type=float, default=1.15, help="Seconds to hold listening/sound-seek behavior after a high-confidence speaker decision.")
     parser.add_argument("--speaker-seek-min-confidence", type=float, default=0.30, help="Minimum confidence for sound-seeking when speech is heard but no visible speaker is identified.")
-    parser.add_argument("--speaker-secondary-min-area", type=float, default=0.018, help="Minimum frame-area ratio for secondary speaker face candidates. Raises this to suppress false person_2 tracks.")
+    parser.add_argument("--speaker-secondary-min-area", type=float, default=0.006, help="Minimum frame-area ratio for secondary speaker face candidates. Default matches min candidate area so non-primary speakers are not dropped.")
     parser.add_argument("--speaker-debug", action="store_true", help="Log detailed face-track and speaker-fusion diagnostics.")
 
     parser.add_argument("--enable-stt", action="store_true", help="Enable gated local speech-to-text. Accepted transcripts are routed to the existing grounded recall pipeline.")
@@ -154,6 +157,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--stt-cooldown-s", type=float, default=1.25, help="Cooldown after one transcript before a new utterance can start.")
     parser.add_argument("--stt-speaker-min-confidence", type=float, default=0.45, help="Minimum active-speaker confidence required before recording an utterance for STT.")
     parser.add_argument("--stt-min-words", type=int, default=2, help="Reject transcripts with fewer words than this.")
+    parser.add_argument("--stt-require-wake-word", action="store_true", help="Only accept voice recall when a configured Lumos wake phrase is present.")
+    parser.add_argument("--stt-wake-words", type=str, default="Lumos,hey Lumos", help="Comma-separated wake phrases for voice recall gating.")
+    parser.add_argument("--stt-min-confidence", type=float, default=0.0, help="Minimum STT confidence for voice recall gating when the backend reports confidence.")
+    parser.add_argument("--stt-cooldown-sec", type=float, default=None, help="Alias for --stt-cooldown-s.")
+
+    parser.add_argument("--enable-audio-output", action="store_true", help="Enable optional non-blocking local sound cues for behavior events.")
+    parser.add_argument("--enable-tts", action="store_true", help="Enable optional local pyttsx3 TTS for speech_text responses.")
+    parser.add_argument("--tts-rate", type=int, default=175, help="pyttsx3 speech rate for --enable-tts.")
+    parser.add_argument("--tts-volume", type=float, default=0.85, help="pyttsx3 volume in [0,1] for --enable-tts.")
 
     parser.add_argument("--interactive-recall", action="store_true", help="Debug only: allow terminal recall questions while the backend is running.")
     parser.add_argument("--enable-godot-chat", action="store_true", help="Legacy/non-primary: listen for live chat queries from Godot over local UDP.")
@@ -287,6 +299,7 @@ def build_configs(
     DirectionOfArrivalConfig,
     SpeakerAwarenessConfig,
     SpeechToTextConfig,
+    AudioOutputConfig,
 ]:
     camera_config = CameraConfig(index=args.camera_index, width=args.width, height=args.height)
     engagement_config = EngagementConfig(
@@ -358,6 +371,7 @@ def build_configs(
         policy_seek_min_confidence=max(0.0, min(1.0, float(args.speaker_seek_min_confidence))),
         secondary_face_min_area_ratio=max(0.0, float(args.speaker_secondary_min_area)),
     )
+    stt_cooldown = args.stt_cooldown_sec if args.stt_cooldown_sec is not None else args.stt_cooldown_s
     stt_config = SpeechToTextConfig(
         enabled=bool(args.enable_stt),
         backend=str(args.stt_backend),
@@ -369,8 +383,18 @@ def build_configs(
         min_utterance_s=max(0.15, float(args.stt_min_utterance_s)),
         max_utterance_s=max(0.5, float(args.stt_max_utterance_s)),
         end_silence_s=max(0.15, float(args.stt_end_silence_s)),
-        cooldown_s=max(0.0, float(args.stt_cooldown_s)),
+        cooldown_s=max(0.0, float(stt_cooldown)),
+        intent_cooldown_s=max(0.0, float(stt_cooldown)),
         min_words=max(1, int(args.stt_min_words)),
+        require_wake_word=bool(args.stt_require_wake_word),
+        wake_words=parse_wake_words(args.stt_wake_words),
+        min_confidence=max(0.0, min(1.0, float(args.stt_min_confidence))),
+    )
+    audio_output_config = AudioOutputConfig(
+        enabled=bool(args.enable_audio_output),
+        tts_enabled=bool(args.enable_tts),
+        tts_rate=int(args.tts_rate),
+        tts_volume=max(0.0, min(1.0, float(args.tts_volume))),
     )
     return (
         camera_config,
@@ -386,6 +410,7 @@ def build_configs(
         doa_config,
         speaker_config,
         stt_config,
+        audio_output_config,
     )
 
 
@@ -409,6 +434,7 @@ def main() -> int:
         doa_config,
         speaker_config,
         stt_config,
+        audio_output_config,
     ) = build_configs(args)
 
     run_paths = create_run_paths(
@@ -452,6 +478,8 @@ def main() -> int:
     stt_result_queue: queue.Queue[SpeechTranscript] = queue.Queue()
     utterance_segmenter = UtteranceSegmenter(stt_config, logger=logger)
     stt_worker = SpeechToTextWorker(stt_config, stt_result_queue, logger=logger)
+    stt_intent_gate = STTIntentGate(stt_config)
+    audio_output = AudioOutputWorker(audio_output_config, logger=logger)
     preview_window = PreviewWindow(
         PreviewWindowConfig(
             title="Lumos - CV Preview",
@@ -618,7 +646,7 @@ def main() -> int:
         speaker_config.secondary_face_min_area_ratio,
     )
     logger.info(
-        "STT config enabled=%s backend=%s model=%s device=%s compute_type=%s gated_by_speaker=True min_utterance=%.2fs max_utterance=%.2fs end_silence=%.2fs speaker_min_conf=%.2f",
+        "STT config enabled=%s backend=%s model=%s device=%s compute_type=%s gated_by_speaker=True min_utterance=%.2fs max_utterance=%.2fs end_silence=%.2fs speaker_min_conf=%.2f require_wake=%s wake_words=%s min_conf=%.2f cooldown=%.2f",
         stt_config.enabled,
         stt_config.backend,
         stt_config.model_size,
@@ -628,6 +656,17 @@ def main() -> int:
         stt_config.max_utterance_s,
         stt_config.end_silence_s,
         stt_config.speaker_min_confidence,
+        stt_config.require_wake_word,
+        stt_config.wake_words,
+        stt_config.min_confidence,
+        stt_config.intent_cooldown_s,
+    )
+    logger.info(
+        "Audio output config cues_enabled=%s tts_enabled=%s tts_rate=%s tts_volume=%.2f",
+        audio_output_config.enabled,
+        audio_output_config.tts_enabled,
+        audio_output_config.tts_rate,
+        audio_output_config.tts_volume,
     )
     if speaker_config.enabled and not audio_config.enabled:
         reason_payload = {"event": "speaker_awareness_disabled_reason", "reason": "enable_speaker_awareness_without_enable_audio"}
@@ -672,6 +711,7 @@ def main() -> int:
 
     try:
         audio_started = False
+        audio_output.start()
         if audio_config.enabled:
             audio_started = audio_capture.start()
         if speaker_config.enabled and audio_config.enabled and audio_started:
@@ -945,6 +985,7 @@ def main() -> int:
                 last_detected_objects=last_detected_objects,
                 gesture=gesture_payload,
                 speaker=speaker_payload,
+                interruption=speaker_policy_decision.to_protocol_dict(),
             )
             command_ms = (time.perf_counter() - t0) * 1000.0
 
@@ -975,7 +1016,21 @@ def main() -> int:
                     stt_last_text = transcript.text
                     stt_last_status = transcript.reason
                     append_jsonl(stt_event_paths, {"event": "stt_transcript", **transcript.to_log_dict()})
-                    if transcript.accepted and recall_queue is not None:
+                    if transcript.accepted:
+                        gate_decision = stt_intent_gate.evaluate(transcript.text, confidence=transcript.confidence)
+                        append_jsonl(stt_event_paths, {"event": "stt_intent_gate", "request_id": transcript.request_id, **gate_decision.to_log_dict()})
+                        logger.info(
+                            "stt_intent_gate request_id=%s accepted=%s reason=%s directed=%s clear_memory_query=%s text=%r",
+                            transcript.request_id,
+                            gate_decision.accepted,
+                            gate_decision.reason,
+                            gate_decision.directed_to_lumos,
+                            gate_decision.clear_memory_query,
+                            transcript.text,
+                        )
+                    else:
+                        gate_decision = None
+                    if transcript.accepted and gate_decision is not None and gate_decision.accepted and recall_queue is not None:
                         recall_queue.put(
                             RecallWorkItem(
                                 text=transcript.text,
@@ -988,6 +1043,13 @@ def main() -> int:
                             transcript.request_id,
                             transcript.text,
                             transcript.speaker_track_id,
+                        )
+                    elif transcript.accepted and gate_decision is not None and not gate_decision.accepted:
+                        logger.info(
+                            "voice_recall_transcript_rejected request_id=%s reason=%s text=%r",
+                            transcript.request_id,
+                            gate_decision.reason,
+                            transcript.text,
                         )
                     elif transcript.accepted:
                         logger.warning(
@@ -1037,9 +1099,11 @@ def main() -> int:
                         last_detected_objects=last_detected_objects,
                         gesture=gesture_payload,
                         speaker=speaker_payload,
+                        interruption=speaker_policy_decision.to_protocol_dict(),
                     )
                     print(json.dumps(thinking_command, ensure_ascii=False), flush=True)
                     append_jsonl(command_paths, thinking_command)
+                    audio_output.submit_behavior(thinking_command.get("behavior", {}))
                     last_godot_udp_send_ms = godot_sender.send(thinking_command)
                     last_emit_at = time.monotonic()
                     should_emit = False
@@ -1082,9 +1146,11 @@ def main() -> int:
                         gesture=gesture_payload,
                         recall_target=recall_target,
                         speaker=speaker_payload,
+                        interruption=speaker_policy_decision.to_protocol_dict(),
                     )
                     print(json.dumps(final_recall_command, ensure_ascii=False), flush=True)
                     append_jsonl(command_paths, final_recall_command)
+                    audio_output.submit_behavior(final_recall_command.get("behavior", {}))
                     last_godot_udp_send_ms = godot_sender.send(final_recall_command)
                     last_emit_at = time.monotonic()
                     should_emit = False
@@ -1150,6 +1216,7 @@ def main() -> int:
                         last_detected_objects=last_detected_objects,
                         gesture=gesture_payload,
                         speaker=speaker_payload,
+                        interruption=speaker_policy_decision.to_protocol_dict(),
                     )
                 elif active_recall_feedback is not None:
                     outgoing_command = build_behavior_command(
@@ -1160,9 +1227,11 @@ def main() -> int:
                         gesture=gesture_payload,
                         recall_target=active_recall_feedback["recall_target"],
                         speaker=speaker_payload,
+                        interruption=speaker_policy_decision.to_protocol_dict(),
                     )
                 print(json.dumps(outgoing_command, ensure_ascii=False), flush=True)
                 append_jsonl(command_paths, outgoing_command)
+                audio_output.submit_behavior(outgoing_command.get("behavior", {}))
                 last_godot_udp_send_ms = godot_sender.send(outgoing_command)
                 last_emit_at = now
 
@@ -1210,6 +1279,12 @@ def main() -> int:
                     "raw_face_count": raw_engagement.raw_face_count,
                     "candidate_count": raw_engagement.candidate_count,
                     "selected_face_score": round(smoothed_engagement.selected_face_score, 3),
+                    "head_pose_status": smoothed_engagement.head_pose_status,
+                    "head_pose_confidence": round(smoothed_engagement.head_pose_confidence, 3),
+                    "head_pose_yaw": "" if smoothed_engagement.yaw is None else round(smoothed_engagement.yaw, 2),
+                    "head_pose_pitch": "" if smoothed_engagement.pitch is None else round(smoothed_engagement.pitch, 2),
+                    "head_pose_roll": "" if smoothed_engagement.roll is None else round(smoothed_engagement.roll, 2),
+                    "head_pose_fallback_used": smoothed_engagement.fallback_mode_used,
                     "object_count": len(display_detections) if object_detector.enabled else 0,
                     "gesture_status": gesture_result.status,
                     "gesture_confidence": round(gesture_result.confidence, 3),
@@ -1223,6 +1298,10 @@ def main() -> int:
                     "speaker_doa_azimuth_deg": "" if last_speaker_result is None or last_speaker_result.doa_azimuth_deg is None else round(last_speaker_result.doa_azimuth_deg, 2),
                     "speaker_policy_override": speaker_policy_decision.overridden,
                     "speaker_policy_reason": speaker_policy_decision.reason,
+                    "speaker_do_not_interrupt": speaker_policy_decision.do_not_interrupt,
+                    "speaker_quiet_listening": speaker_policy_decision.quiet_listening,
+                    "speaker_safe_to_respond": speaker_policy_decision.safe_to_respond,
+                    "speaker_suppressed_behavior": speaker_policy_decision.suppressed_behavior or "",
                     "memory_write_count": memory_write_count,
                     "memory_duplicate_skip_count": memory_duplicate_skip_count,
                     "consecutive_engaged": transition.consecutive_engaged,
@@ -1268,9 +1347,11 @@ def main() -> int:
         if web_chat_server is not None:
             web_chat_server.stop()
         gesture_detector.close()
+        detector.close()
         stt_worker.stop()
         speaker_worker.stop()
         audio_capture.stop()
+        audio_output.stop()
         godot_sender.close()
         camera.release()
         if runtime_config.show_window:

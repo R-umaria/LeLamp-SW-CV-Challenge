@@ -216,6 +216,8 @@ func _refresh_debug_ui() -> void:
 	var speaker: Dictionary = _dictionary_value(_last_command, "speaker")
 	var memory: Dictionary = _dictionary_value(_last_command, "memory")
 	var recall_target: Dictionary = _dictionary_value(memory, "recall_target")
+	var command_target: Dictionary = _dictionary_value(_last_command, "target")
+	var interruption: Dictionary = _dictionary_value(_last_command, "interruption")
 	var speech_value: Variant = behavior.get("speech_text", "")
 	var speech_text: String = "" if speech_value == null else str(speech_value)
 	var now: float = Time.get_unix_time_from_system()
@@ -228,7 +230,7 @@ func _refresh_debug_ui() -> void:
 	var doa_text: String = _doa_debug_text(speaker.get("doa_azimuth_deg", null))
 
 	var lines: Array[String] = []
-	lines.append("Lumos Milestone 4.11 Active Speaker Awareness")
+	lines.append("Lumos Milestone 5.0 Final Hardening + IK")
 	lines.append("UDP: %s" % _receiver_status)
 	lines.append("Lumos browser chat: http://127.0.0.1:8765")
 	lines.append("Health: %s  age: %.1fs" % [connection_health, packet_age_s])
@@ -236,6 +238,13 @@ func _refresh_debug_ui() -> void:
 	lines.append("Motion: %s  Light: %s" % [str(behavior.get("motion", "none")), str(behavior.get("light", "none"))])
 	lines.append("Engagement: %s  %.2f" % [str(engagement.get("status", "unknown")), float(engagement.get("confidence", 0.0))])
 	lines.append("Reason: %s" % str(engagement.get("reason", "none")))
+	lines.append("Head pose: %s yaw=%s pitch=%s roll=%s fallback=%s" % [
+		str(engagement.get("head_pose_status", "unknown")),
+		_optional_debug_value(engagement.get("yaw", null)),
+		_optional_debug_value(engagement.get("pitch", null)),
+		_optional_debug_value(engagement.get("roll", null)),
+		_bool_debug_text(engagement.get("fallback_mode_used", null)),
+	])
 	lines.append("Face hint: x=%s  y=%s  area=%s" % [face_x_text, face_y_text, face_area_text])
 	lines.append("Gesture: %s  %.2f  target=(%s,%s)" % [
 		str(gesture.get("status", "none")),
@@ -246,6 +255,20 @@ func _refresh_debug_ui() -> void:
 	lines.append("Speech: %s  Speaker: %s  %.2f" % ["active" if bool(speaker.get("speech_detected", false)) else "inactive", _speaker_track_text(speaker), float(speaker.get("confidence", 0.0))])
 	lines.append("To Lumos: %s  DOA: %s" % [speaker_to_lumos, doa_text])
 	lines.append("Speaker reason: %s" % str(speaker.get("reason", "none")))
+	if interruption.size() > 0:
+		lines.append("Interruption: do_not=%s quiet=%s safe=%s suppressed=%s" % [
+			_bool_debug_text(interruption.get("do_not_interrupt", null)),
+			_bool_debug_text(interruption.get("quiet_listening", null)),
+			_bool_debug_text(interruption.get("safe_to_respond", null)),
+			str(interruption.get("suppressed_behavior", "none")),
+		])
+	if command_target.size() > 0:
+		lines.append("Command target: %s x=%s y=%s hold=%s" % [
+			str(command_target.get("type", "none")),
+			_optional_debug_value(command_target.get("x_norm", null)),
+			_optional_debug_value(command_target.get("y_norm", null)),
+			_optional_debug_value(command_target.get("hold_sec", null)),
+		])
 	if recall_target.size() > 0:
 		lines.append("Recall target: found=%s loc=%s point=(%s,%s)" % [
 			str(recall_target.get("found", false)),
@@ -254,7 +277,13 @@ func _refresh_debug_ui() -> void:
 			_optional_debug_value(recall_target.get("point_y_norm", null)),
 		])
 	lines.append("Recall panel: %s" % ("visible" if _response_panel != null and _response_panel.visible else "hidden"))
-	lines.append("Motion safety: planted base + S-curve joint limits")
+	lines.append("IK target: %s pos=%s workspace_clamped=%s" % [
+		str(lamp.get("command_target_type")),
+		_vector3_debug_text(lamp.get("ik_debug_target_position")),
+		_bool_debug_text(lamp.get("ik_debug_workspace_clamped")),
+	])
+	lines.append("IK joint clamps: %s" % _dictionary_compact_text(lamp.get("ik_debug_joint_clamps")))
+	lines.append("Motion safety: planted base + bounded IK + S-curve joint limits")
 	if speech_text != "":
 		lines.append("Speech: %s" % speech_text)
 
@@ -297,6 +326,32 @@ func _optional_debug_value(value: Variant) -> String:
 	if value_type == TYPE_FLOAT or value_type == TYPE_INT:
 		return "%.2f" % float(value)
 	return "n/a"
+
+
+func _bool_debug_text(value: Variant) -> String:
+	if value == null:
+		return "n/a"
+	return "yes" if bool(value) else "no"
+
+
+func _vector3_debug_text(value: Variant) -> String:
+	if typeof(value) != TYPE_VECTOR3:
+		return "n/a"
+	var vector_value: Vector3 = value as Vector3
+	return "(%.2f, %.2f, %.2f)" % [vector_value.x, vector_value.y, vector_value.z]
+
+
+func _dictionary_compact_text(value: Variant) -> String:
+	if typeof(value) != TYPE_DICTIONARY:
+		return "n/a"
+	var source: Dictionary = value as Dictionary
+	var clamped_keys: Array[String] = []
+	for key: Variant in source.keys():
+		if bool(source[key]):
+			clamped_keys.append(str(key))
+	if clamped_keys.is_empty():
+		return "none"
+	return ",".join(clamped_keys)
 
 
 func _default_command() -> Dictionary:
